@@ -28,26 +28,26 @@ testdata/ 合成フレーム・IE・中継とのやりとりの見本（3部品�
 
 ## M0 土台
 
-- [ ] git、`CLAUDE.md`、`docs/`（spec、brief、PLAN、DECISIONS、PROGRESS）、`.gitignore`
-- [ ] `server/`：venv、依存の版の固定、pytestの設定
-- [ ] `channels.py`：57chの表（2.4GHz 13、5GHz 20、6GHz 24）、PSC、ブロック、重なりの計算
-- [ ] `clock.py`：実時間と偽の時計
-- [ ] `config.py`：`config.example.json` とその検証（間違いは分かる言葉で止める）
-- [ ] `capture/build.py`：合成フレームの生成器（radiotap、ビーコン、HE/EHT Operation、重複ビーコン、RNR、deauth、リトライ付きデータ、FCS付き）
-- [ ] `radio/base.py`・`radio/fake.py`：無線の共通インタフェースと偽の無線（シナリオの局が合成フレームを出す）
-- [ ] `tools/gen_testdata.py` → `testdata/`
-- [ ] `relay/` の雛形：TypeScript、ビルドとテストが通る、偽のRedis（コマンド数と転送量を数える）
+- [x] git、`CLAUDE.md`、`docs/`（spec、brief、PLAN、DECISIONS、PROGRESS）、`.gitignore`
+- [x] `server/`：venv、依存の版の固定、pytestの設定
+- [x] `channels.py`：57chの表（2.4GHz 13、5GHz 20、6GHz 24）、PSC、ブロック、重なりの計算
+- [x] `clock.py`：実時間と偽の時計
+- [x] `config.py`：`config.example.json` とその検証（間違いは分かる言葉で止める）
+- [x] `capture/build.py`：合成フレームの生成器（radiotap、ビーコン、HE/EHT Operation、重複ビーコン、RNR、deauth、リトライ付きデータ、FCS付き）
+- [x] `radio/base.py`・`radio/fake.py`：無線の共通インタフェースと偽の無線（シナリオの局が合成フレームを出す）
+- [x] `tools/gen_testdata.py` → `testdata/`
+- [x] `relay/` の雛形：TypeScript、ビルドとテストが通る、偽のRedis（コマンド数と転送量を数える）
 
 ## M1 解析
 
-- [ ] radiotap（拡張present、名前空間、ベンダ名前空間、整列、合成RSSI、FCSフラグ、PPDUの帯域）
-- [ ] 802.11ヘッダ（種類、アドレス、Retry、Protected、QoS、HTC）
-- [ ] IE（SSID、DS、HT/VHT Operation、HE Operation＋6GHz情報、EHT Operation、RNR、RSN、WPS、ベンダIE、国、HE/EHT Capabilities）
-- [ ] 主chと帯域幅の決定（EHT → HE 6GHz → VHT → HT の順）
-- [ ] 局の表（主chで1件、重複ビーコンは主chで数える、受信したchは別に記録）、端末の表（MACヘッダだけ）
-- [ ] chごとの統計（受信秒数で割る、(ch, 受信幅) ごと、10秒の桶）
-- [ ] AF_PACKETのBPFで、データフレームをカーネル内でMACヘッダまでに切る（ペイロードがユーザ空間に来ない）
-- [ ] 処理能力の測定（毎秒5000フレーム／1コア）
+- [x] radiotap（拡張present、名前空間、ベンダ名前空間、整列、合成RSSI、FCSフラグ、PPDUの帯域）
+- [x] 802.11ヘッダ（種類、アドレス、Retry、Protected、QoS、HTC）
+- [x] IE（SSID、DS、HT/VHT Operation、HE Operation＋6GHz情報、EHT Operation、RNR、RSN、WPS、ベンダIE、国、HE/EHT Capabilities）
+- [x] 主chと帯域幅の決定（EHT → HE 6GHz → VHT → HT の順）
+- [x] 局の表（主chで1件、重複ビーコンは主chで数える、受信したchは別に記録）、端末の表（MACヘッダだけ）
+- [x] chごとの統計（受信秒数で割る、(ch, 受信幅) ごと、10秒の桶）
+- [x] AF_PACKETのBPFで、データフレームをカーネル内でMACヘッダまでに切る（ペイロードがユーザ空間に来ない）
+- [x] 処理能力の測定（毎秒5000フレーム／1コア）
 - 完了条件：6GHzのビーコンが局の表に載り、主chと帯域幅（160/320MHzを含む）が正しい。重複ビーコンを主chで数える。
 
 ## M2 巡回
