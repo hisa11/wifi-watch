@@ -43,6 +43,7 @@ class BatchResult:
     frames: int
     accepted: int
     receive_s: float
+    beacons: dict[str, int | None]  # この束でビーコン・プローブ応答を受けた局 → 最も強かった値
 
 
 class Analyzer:
@@ -66,6 +67,7 @@ class Analyzer:
         now = self.clock.time()
         mono = batch.t_end
         accepted = 0
+        seen: dict[str, int | None] = {}
         own = self.own
         table = self.table
         stats = self.stats
@@ -123,6 +125,9 @@ class Analyzer:
                         info = ies.parse_bss(raw, body, end)
                     st = table.update_beacon(bssid, tun.freq, rx.signal, info, now, mono)
                     if st is not None:
+                        prev = seen.get(bssid)
+                        if bssid not in seen or (rx.signal is not None and (prev is None or rx.signal > prev)):
+                            seen[bssid] = rx.signal
                         stats.count_beacon_primary(st.primary_freq)
                         if st_type == dot11.ST_BEACON:
                             b.beacons += 1
@@ -139,7 +144,7 @@ class Analyzer:
                 cl = h.client
                 table.note_data(bss.hex(":") if bss else None, cl.hex(":") if cl else None, rx.signal, now,
                                 bool(cl[0] & 0x02) if cl else False)
-        return BatchResult(len(batch.frames), accepted, batch.receive_s)
+        return BatchResult(len(batch.frames), accepted, batch.receive_s, seen)
 
     def deauths_since(self, mono: float) -> list[DeauthEvent]:
         return [d for d in list(self.deauths) if d.mono >= mono]
