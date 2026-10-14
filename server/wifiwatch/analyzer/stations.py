@@ -130,13 +130,14 @@ class Client:
 
 
 class StationTable:
-    def __init__(self, parse_interval: float = 5.0, max_clients: int = 5000):
+    def __init__(self, parse_interval: float = 5.0, max_clients: int = 5000, reappear_after: float = 600.0):
         self.parse_interval = parse_interval
+        self.reappear_after = reappear_after  # これより長く見ていなかった局が戻ったら「再び現れた」
         self.max_clients = max_clients
         self.stations: dict[str, Station] = {}
         self.clients: dict[str, Client] = {}
         self.lock = threading.RLock()
-        self.on_change: list[Any] = []  # f(station, event) event: new / moved / updated
+        self.on_change: list[Any] = []  # f(station, event) event: new / moved / reappeared
 
     def needs_parse(self, bssid: str, now_mono: float) -> bool:
         st = self.stations.get(bssid)
@@ -158,12 +159,15 @@ class StationTable:
                 event = "new"
             else:
                 event = "updated"
+                if now - st.last_seen > self.reappear_after:
+                    event = "reappeared"
                 if info is not None:
                     op = ies.operating(info, rx_freq)
                     if op.primary_freq != st.primary_freq or op.spans != st.spans:
                         st.prev_primary_freq = st.primary_freq
                         st.moved_at = now
-                        event = "moved"
+                        if event == "updated":
+                            event = "moved"
                     self._apply_info(st, info, op)
                     st.last_parse_mono = now_mono
             st.last_seen = now

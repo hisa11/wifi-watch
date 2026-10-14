@@ -19,7 +19,7 @@ import math
 import threading
 import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
 from . import channels as ch
@@ -59,6 +59,7 @@ class Slot:
     period: int = 0  # 生存確認の「周期」の番号
     liveness: bool = False  # この枠の受信を生存確認に使うか
     scan_id: str | None = None
+    liveness_last: bool = False  # この周期の最後の生存確認の枠（終わったら周期を判定する）
 
     @property
     def freq(self) -> int:
@@ -281,14 +282,14 @@ class Scheduler:
         alloc = self.allocation(mode)
         kinds = self._interleave(alloc)
         has_live_slots = any(k in LIVENESS_GROUPS for k in kinds)
+        every = max(1, round(c.liveness_period_s / c.cycle_s))
+        # 生存確認の「周期」：2.4/5GHzの枠があれば1周期ごと、無ければ30秒（3周期）ごと。1つの周期の枠は同じ番号
+        self._period = self._cycle if has_live_slots else self._cycle // every
         patrol: list[Slot] = []
-        self._period = self._cycle
         for k in kinds:
             f = self._next_in(k, g[k])
             patrol.append(Slot(k, tuning20(f), c.slot_s, self._period, k in LIVENESS_GROUPS))
-        every = max(1, round(c.liveness_period_s / c.cycle_s))
         if not has_live_slots and self._cycle % every == 0:
-            self._period = self._cycle // every
             patrol.append(self._liveness_slot())
         own_total = c.cycle_s - sum(s.dwell for s in patrol)
         n_groups = max(1, min(c.live_groups, len(patrol))) if patrol else 1
@@ -302,6 +303,14 @@ class Scheduler:
         for i in range(n_groups):
             out.append(Slot("own", self.own_tuning, seg, self._period))
             out.extend(chunks[i])
+        return self._mark_last_liveness(out)
+
+    @staticmethod
+    def _mark_last_liveness(out: list[Slot]) -> list[Slot]:
+        for i in range(len(out) - 1, -1, -1):
+            if out[i].liveness:
+                out[i] = replace(out[i], liveness_last=True)
+                break
         return out
 
     def _build_pre(self, g: dict[str, list[int]]) -> list[Slot]:
@@ -313,7 +322,7 @@ class Scheduler:
             n = max(1, math.ceil(len(out) * c.slot_s / c.liveness_period_s))
             for j in range(n):
                 out.insert((j + 1) * len(out) // (n + 1), self._liveness_slot())
-        return out
+        return self._mark_last_liveness(out)
 
     def _coldstart_slots(self) -> list[Slot]:
         d = self.cfg.coldstart_dwell_s

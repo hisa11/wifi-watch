@@ -252,27 +252,27 @@ def demo_scenario() -> Scenario:
         SimStation("02:a0:00:00:00:02", "KOSEN-A-SPARE", ch.parse_channel_ref("6g41"), 20, -58,
                    present=[[600.0, None]], data_rate=40),
         # 所属不明の広帯域（初期設定のまま320MHzのWi-Fi 7ルータ、主ch49）
-        SimStation("1c:2a:a3:11:22:33", "Buffalo-6G-7A3F", ch.parse_channel_ref("6g49"), 320, -55,
+        SimStation("00:1d:73:11:22:33", "Buffalo-6G-7A3F", ch.parse_channel_ref("6g49"), 320, -55,
                    dup_beacon=True, data_rate=30, ap={"wps": {"manufacturer": "BUFFALO INC.", "model_name": "WXR18000BE10P"}}),
         # 自ブロック内の別chの局
         SimStation("02:c0:00:00:00:01", "KOSEN-C-6G", ch.parse_channel_ref("6g45"), 20, -70, data_rate=20),
         # PSC
         SimStation("02:d0:00:00:00:01", "DIRECT-ab-Pixel", ch.parse_channel_ref("6g21"), 20, -75),
         # 5GHz：RoboconFree（ch100〜144に乱立）
-        *[SimStation(f"00:1d:73:00:01:{i:02x}", "ROBOCON_Free_Wi-Fi", ch.parse_channel_ref(f"5g{n}"), 20,
+        *[SimStation(f"02:52:46:00:01:{i:02x}", "ROBOCON_Free_Wi-Fi", ch.parse_channel_ref(f"5g{n}"), 20,
                      -60 - (i % 4) * 5, data_rate=30)
           for i, n in enumerate((100, 108, 116, 124, 132, 140, 144))],
         # 5GHz：CineEye（桁違いに強い）
-        SimStation("6c:5a:b0:00:00:01", "CineEye2-1234", ch.parse_channel_ref("5g44"), 40, -31,
+        SimStation("02:6c:5a:00:00:01", "CineEye2-1234", ch.parse_channel_ref("5g44"), 40, -31,
                    standard="ac", data_rate=400),
         # 5GHz：2.4/5GHzで6GHzをRNRで知らせるルータ（Buffalo の5GHz側）
-        SimStation("1c:2a:a3:11:22:32", "Buffalo-5G-7A3F", ch.parse_channel_ref("5g36"), 80, -57,
+        SimStation("00:1d:73:11:22:32", "Buffalo-5G-7A3F", ch.parse_channel_ref("5g36"), 80, -57,
                    standard="ax", data_rate=10,
                    ap={"wps": {"manufacturer": "BUFFALO INC.", "model_name": "WXR18000BE10P"},
-                       "rnr": build.rnr_ie([(137, 49, [build.RnrAp("1c:2a:a3:11:22:33", build.short_ssid("Buffalo-6G-7A3F"), 0x42)])])}),
+                       "rnr": build.rnr_ie([(137, 49, [build.RnrAp("00:1d:73:11:22:33", build.short_ssid("Buffalo-6G-7A3F"), 0x42)])])}),
         # 2.4GHz
         SimStation("b8:27:eb:00:00:01", "raspberrypi", ch.parse_channel_ref("2g1"), 20, -68, standard="n", data_rate=5),
         SimStation("24:6f:28:00:00:01", "ESP_1A2B3C", ch.parse_channel_ref("2g6"), 20, -72, standard="n"),
-        SimStation("00:1d:73:00:02:01", "ROBOCON_Free_Wi-Fi", ch.parse_channel_ref("2g11"), 20, -64, standard="n", data_rate=20),
+        SimStation("02:52:46:00:02:01", "ROBOCON_Free_Wi-Fi", ch.parse_channel_ref("2g11"), 20, -64, standard="n", data_rate=20),
     ]
     return Scenario(st, seed=7)

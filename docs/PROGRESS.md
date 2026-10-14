@@ -62,6 +62,20 @@
 - 帯域ON/OFFを再起動後も残す（`Overrides` はM0で用意済み。controllerでつなぐのはM5）、変更をイベントに残す（M5）
 - 生存確認のchの選び方（M3）
 
+## M3 警報（2026-10-15）
+
+やったこと
+- `classify.py`：署名（`signatures.json`）、チーム対応表（BSSID・SSIDのパターン）、手動タグ、`known_ok_bssids`、OUI（ieee-data）、機種推定（WPS・SSIDの傾向・ベンダIE・規格・暗号・国・BSS Color）、RNRによる2.4/5/6GHzの紐付け（6GHz側にチームとWPSを引き継ぐ）
+- `analyzer/alerts.py`：警報の状態（発生・追加・cleared・解消）、30秒の抑制、10秒で解消、1回だけの通知（再起動しても覚える口）
+- `analyzer/detect.py`：表の全警報の判定（割当違反2種、新規参入×重なり、正体不明の強力局・広帯域局、RoboconFree・CineEyeの6GHz出現、活動量、リトライ率、同名SSID、deauth洪水、受信停止）
+- `liveness.py`：生存確認の周期の判定と復旧（モニタ再設定 → ドライバ読み込み直し・管理モードでスキャン・JPと6GHzの確認・モニタ → 失敗ならcrit、5分ごとに再試行）
+- `monitor.py`：部品の組み立て（1秒ごとの判定、生存確認のchは最近いちばん局が多い5GHz）
+- `calibration.py`：PREの下見のまとめ
+
+テスト
+- PC側 149件 成功（M3で51件：警報37、受信停止8、分類6）
+- 完了条件：警報ごとに鳴るべき場面と鳴ってはいけない場面のテストあり。静かな6GHzで受信停止が鳴らない（`test_quiet_6ghz_is_not_receive_stop`）。PRE→LIVEで活動量が鳴らない（`test_pre_to_live_switch_does_not_fire_activity`）。
+
 ## 次にやること
 
-M3 警報：警報の枠組み、表の全警報、生存確認と復旧、分類（署名・チーム・OUI・機種推定・RNR）。
+M4 通知：ntfy・Discord、抑制は警報側で済み、無期限の再送（再起動しても消えない待ち行列）、稼働中通知、死活監視、警報音。
