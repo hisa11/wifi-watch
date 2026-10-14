@@ -25,3 +25,4 @@ android/.kotlin/
 # 通信内容は保存しない
 *.pcap
 *.pcapng
+android/app/schemas/*.tmp

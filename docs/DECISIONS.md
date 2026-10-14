@@ -113,6 +113,17 @@
 - **指示が届くまでの秒** — PCがアプリの指示を受け取ったとき、中継が受け付けてからの秒（中継の時計どうし）をイベントに残す（実機の確認12のため）。
 - **NetworkManager** — `/etc/NetworkManager/conf.d/99-wifiwatch-unmanaged.conf` で監視のIFだけ管理外にする（`setup.sh` が確認してから書く）。
 
+## アプリ（M8）
+
+- **2026-10-15 Androidの確かめ（SDKのソースと api-versions.xml）** — `ScanResult.getInformationElements()` と `ScanResult.InformationElement`（getId・getIdExt・getBytes）はAPI 30から。拡張IE（id=255）の中身は拡張IDを除いたもの。`getWifiStandard()` はAPI 30、`CHANNEL_WIDTH_320MHZ`・`WIFI_STANDARD_11BE`・`getWifiSsid()` はAPI 33。`WifiManager.startScan()` はAPI 28で非推奨（使える）。`getScanResults()` は ACCESS_FINE_LOCATION と ACCESS_WIFI_STATE が要り、位置情報サービスがオンであること。スキャンは前面で2分に4回まで（開発者オプションで解除できる。developer.android.com の Wi-Fi scanning）。`ConnectivityManager.requestNetwork(NetworkRequest, NetworkCallback)` は CHANGE_NETWORK_STATE が要り、unregister するまで続く。`Network.getSocketFactory()`・`Network.getAllByName()` はAPI 21から。Android はマルチBSSIDの非送信BSSも別の結果として返す（11ax以上）。
+- **版の組み合わせ** — ユーザーの環境で動いている組み合わせに合わせた：Gradle 9.4.1、AGP 9.2.1（Kotlinは内蔵）、Kotlin 2.2.10（Composeのプラグイン）、Compose BOM 2026.02.01、KSP 2.3.12、Room 2.8.5、WorkManager 2.11.0、OkHttp 4.12.0、lifecycle 2.9.4。compileSdk・targetSdk 36、minSdk 30。
+- **モバイル回線への固定** — `requestNetwork(TRANSPORT_CELLULAR＋NET_CAPABILITY_INTERNET)` で得たNetworkに、OkHttpのソケット（`socketFactory`）と名前解決（`dns` に `Network.getAllByName`）の両方を結びつける。`bindProcessToNetwork` は使わない（操縦用アプリやWebViewに影響しないよう、wifiwatchの通信だけを結びつける）。WorkManagerの再送も同じクライアントを使う（「ネットワークあり」の条件だけに頼らない）。設定に「固定する」のスイッチ（既定オン）を置き、オフはエミュレータでローカルの中継を試すときだけ。
+- **指示は待ち行列に入れない** — 手動スキャンと帯域ON/OFFはその場で送り、20秒だけ送り直す。届かなければ「送れなかった」と出す（WorkManagerで後から送ると、回線が戻ったあとで古い手動スキャンが走りうるため）。ラベルの変更と歩測の記録は待ち行列（Room）に入れ、WorkManagerで無期限に送り直す。要求IDつきなので二重に届いても結果は同じ。
+- **トークンの保存** — Android KeystoreのAES-256-GCMの鍵で暗号化してSharedPreferencesに置く（`security-crypto` の EncryptedSharedPreferences は非推奨のため使わない）。
+- **平文のhttp** — ネットワークのセキュリティ設定で、10.0.2.2・127.0.0.1・localhost だけ許す（エミュレータからローカルの中継へ）。本番は https。
+- **歩測の記録** — 1地点で何回もスキャンして局ごとにまとめ、強さは中央値。IEは生のバイト列（`ies_hex`）で残す（PCでも同じ解析ができるように）。IEが無い局は ScanResult の channelWidth と centerFreq0 で幅を決める。30秒より古い結果（前のスキャンの残り）は使わない。
+- **画面** — 下のタブで「状態・スキャン・帯域・記録・歩測」、設定は右上。状態の画面の一番上に判定（緊急／警告／検知なし／PCから応答なし）。状態の写しが30秒より古ければ「検知なし」ではなく「PCから応答なし」と出す。chの帯（6/5/2.4GHz）はデスクトップと同じ意味の色と斜線。アイコンの部品（material-icons）は使わず、記号の文字で済ませた（依存を増やさない）。
+
 ## 偽の無線のモデル（実機で確かめるまでの仮定）
 
 - 受信機は主20MHzで検出する。20MHzのビーコンは局の主chでだけ聞こえる。重複ビーコンの局は局の帯域内のどの20MHzでも聞こえる。

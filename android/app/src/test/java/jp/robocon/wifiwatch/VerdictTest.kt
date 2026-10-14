@@ -1,0 +1,53 @@
+package jp.robocon.wifiwatch
+
+import jp.robocon.wifiwatch.core.Channels
+import jp.robocon.wifiwatch.core.Ies
+import jp.robocon.wifiwatch.core.PcState
+import jp.robocon.wifiwatch.ui.MainViewModel
+import jp.robocon.wifiwatch.ui.verdictOf
+import jp.robocon.wifiwatch.wifi.WalkScanner
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class VerdictTest {
+    private val base = PcState.parse(JSONObject(TestData.text("relay/pc_state.json")))
+
+    private fun live(s: PcState?, ageMs: Long?) = MainViewModel.Live(state = s, stateAgeMs = ageMs, relayNow = 0, polledAtElapsed = 0)
+
+    @Test
+    fun staleStateIsNotNoDetection() {
+        val v = verdictOf(live(base.copy(alerts = emptyList(), warn = 0, crit = 0), 45_000))
+        assertEquals("PCから応答なし", v.title) // 古い状態を「検知なし」と出さない
+        assertEquals("blind", v.level)
+    }
+
+    @Test
+    fun levels() {
+        assertEquals("警告 1", verdictOf(live(base, 1000)).title)
+        val crit = base.copy(crit = 1, alerts = listOf(PcState.Alert("crit", "sig6_crit", "CineEyeの6GHz出現", "m", 0)))
+        assertEquals("緊急 1", verdictOf(live(crit, 1000)).title)
+        val none = base.copy(warn = 0, alerts = emptyList(), excludedBands = listOf("2.4"))
+        val v = verdictOf(live(none, 1000))
+        assertEquals("検知なし", v.title)
+        assertTrue(v.sub.contains("2.4GHz（巡回外）")) // 見ていないところを添える
+        assertEquals("PCの状態がまだありません", verdictOf(live(null, null)).title)
+        assertEquals("受信停止", verdictOf(live(base.copy(rxState = "failed"), 1000)).title)
+    }
+
+    @Test
+    fun walkRecordHasSampleShape() {
+        val sample = JSONObject(TestData.text("relay/app_walk.json")).getJSONObject("record")
+        val ies = Ies.unhex(sample.getJSONArray("stations").getJSONObject(0).getString("ies_hex"))
+        val op = Ies.operating(Ies.parseRaw(ies), 5975)
+        val seen = WalkScanner.Seen("02:a0:00:00:00:01", "KOSEN-A-6G", 5975, 0, 0, 0, mutableListOf(-60, -58, -57), Ies.hex(ies), "ax", op, 1)
+        val rec = WalkScanner.record("walk-1", "pixel-9a", 30, WalkScanner.Progress(5, 5, 0, 1, 0), listOf(seen), "フィールド北", listOf("歩測"), "", 1.0)
+        assertEquals(sample.keys().asSequence().sorted().toList(), rec.keys().asSequence().sorted().toList())
+        val st = rec.getJSONArray("stations").getJSONObject(0)
+        val ss = sample.getJSONArray("stations").getJSONObject(0)
+        assertTrue(ss.keys().asSequence().all { st.has(it) })
+        assertEquals(-58, st.getInt("rssi")) // 中央値
+        assertEquals(Channels.freqToNumber(5975), st.getInt("ch"))
+    }
+}
