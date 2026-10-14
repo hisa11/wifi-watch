@@ -1,0 +1,64 @@
+{
+ "request_id": "app-walk-0001",
+ "record": {
+  "id": "walk-20261015-0001",
+  "kind": "walk",
+  "created_at": 1791936100.0,
+  "device": "pixel-9a",
+  "settings": {
+   "seconds": 30,
+   "height_m": 1.0,
+   "app": "wifiwatch-android"
+  },
+  "stations": [
+   {
+    "bssid": "02:a0:00:00:00:01",
+    "ssid": "KOSEN-A-6G",
+    "freq": 5975,
+    "ch": 5,
+    "width": 20,
+    "center0": null,
+    "rssi": -58,
+    "standard": "ax",
+    "ies_hex": "000a4b4f53454e2d412d364701088c129824b048606c05040001000007064a5004010d1430140100000fac040100000fac040100000fac08c000ff16230500181200100c20200200000000000000fafffaffff0c2404000201fcff0500050006ff033bbd06",
+    "primary_freq": 5975,
+    "spans": [
+     [
+      5965.0,
+      5985.0
+     ]
+    ],
+    "width_label": "20",
+    "seen_us": 123456789
+   },
+   {
+    "bssid": "00:1d:73:11:22:33",
+    "ssid": "Buffalo-6G-7A3F",
+    "freq": 6195,
+    "ch": 49,
+    "width": 320,
+    "center0": 6105,
+    "rssi": -55,
+    "standard": "be",
+    "ies_hex": null,
+    "primary_freq": 6195,
+    "spans": [
+     [
+      5945.0,
+      6265.0
+     ]
+    ],
+    "width_label": "320",
+    "seen_us": 123456000
+   }
+  ],
+  "label": {
+   "location": "フィールド北",
+   "tags": [
+    "歩測"
+   ],
+   "memo": "",
+   "updated_at": 1791936100.0
+  }
+ }
+}

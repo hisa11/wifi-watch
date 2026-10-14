@@ -1,0 +1,12 @@
+{
+ "request_id": "app-bands-0001",
+ "type": "bands",
+ "params": {
+  "excluded_bands": [
+   "2.4"
+  ],
+  "excluded_freqs": [
+   5180
+  ]
+ }
+}

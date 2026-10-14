@@ -1,0 +1,462 @@
+{
+ "id": "scan-08d8bb1ad8cf",
+ "kind": "pc_scan",
+ "created_at": 1791936067.65,
+ "device": "pit-pc",
+ "origin": "app",
+ "request_id": "app-scan-0001",
+ "settings": {
+  "freqs": [
+   6135,
+   6115,
+   6155,
+   6175,
+   6195,
+   6215,
+   6235,
+   6255,
+   5975,
+   6055,
+   6295,
+   6375,
+   5955,
+   5995,
+   6015,
+   6035,
+   6075,
+   6095,
+   6275,
+   6315,
+   6335,
+   6355,
+   6395,
+   6415
+  ],
+  "slot_s": 0.25,
+  "width": 20,
+  "mode_before": "LIVE",
+  "requested_at": 1791936061.65
+ },
+ "bands": [
+  "6"
+ ],
+ "stations": [
+  {
+   "bssid": "02:a0:00:00:00:01",
+   "ssid": "KOSEN-A-6G",
+   "hidden": false,
+   "band": "6",
+   "freq": 5975,
+   "ch": 5,
+   "width": 20,
+   "width_label": "20",
+   "spans": [
+    [
+     5965.0,
+     5985.0
+    ]
+   ],
+   "rssi": -60,
+   "standard": "ax",
+   "security": "WPA3-SAE",
+   "model_guess": null,
+   "team": "A高専",
+   "kind": "team",
+   "signature": null,
+   "dup_beacon": false
+  },
+  {
+   "bssid": "02:d0:00:00:00:01",
+   "ssid": "DIRECT-ab-Pixel",
+   "hidden": false,
+   "band": "6",
+   "freq": 6055,
+   "ch": 21,
+   "width": 20,
+   "width_label": "20",
+   "spans": [
+    [
+     6045.0,
+     6065.0
+    ]
+   ],
+   "rssi": -75,
+   "standard": "ax",
+   "security": "WPA3-SAE",
+   "model_guess": "Wi-Fi Direct",
+   "team": null,
+   "kind": "unknown",
+   "signature": null,
+   "dup_beacon": false
+  },
+  {
+   "bssid": "02:00:00:00:00:01",
+   "ssid": "OUR-ROBOT-6G",
+   "hidden": false,
+   "band": "6",
+   "freq": 6135,
+   "ch": 37,
+   "width": 20,
+   "width_label": "20",
+   "spans": [
+    [
+     6125.0,
+     6145.0
+    ]
+   ],
+   "rssi": -49,
+   "standard": "ax",
+   "security": "WPA3-SAE",
+   "model_guess": null,
+   "team": "自チーム",
+   "kind": "own",
+   "signature": null,
+   "dup_beacon": false
+  },
+  {
+   "bssid": "02:c0:00:00:00:01",
+   "ssid": "KOSEN-C-6G",
+   "hidden": false,
+   "band": "6",
+   "freq": 6175,
+   "ch": 45,
+   "width": 20,
+   "width_label": "20",
+   "spans": [
+    [
+     6165.0,
+     6185.0
+    ]
+   ],
+   "rssi": -67,
+   "standard": "ax",
+   "security": "WPA3-SAE",
+   "model_guess": null,
+   "team": null,
+   "kind": "unknown",
+   "signature": null,
+   "dup_beacon": false
+  },
+  {
+   "bssid": "00:1d:73:11:22:33",
+   "ssid": "Buffalo-6G-7A3F",
+   "hidden": false,
+   "band": "6",
+   "freq": 6195,
+   "ch": 49,
+   "width": 320,
+   "width_label": "320",
+   "spans": [
+    [
+     5945.0,
+     6265.0
+    ]
+   ],
+   "rssi": -52,
+   "standard": "be",
+   "security": "WPA3-SAE",
+   "model_guess": "BUFFALO INC. WXR18000BE10P",
+   "team": null,
+   "kind": "unknown",
+   "signature": null,
+   "dup_beacon": true
+  },
+  {
+   "bssid": "02:b0:00:00:00:01",
+   "ssid": "KOSEN-B-6G",
+   "hidden": false,
+   "band": "6",
+   "freq": 6215,
+   "ch": 53,
+   "width": 40,
+   "width_label": "40",
+   "spans": [
+    [
+     6185.0,
+     6225.0
+    ]
+   ],
+   "rssi": -61,
+   "standard": "ax",
+   "security": "WPA3-SAE",
+   "model_guess": null,
+   "team": "B高専",
+   "kind": "team",
+   "signature": null,
+   "dup_beacon": false
+  }
+ ],
+ "channels": [
+  {
+   "freq": 6135,
+   "band": "6",
+   "ch": 37,
+   "receive_s": 0.22,
+   "frames": 77,
+   "rate": 350.0,
+   "bss_primary": 1,
+   "bss_overlap": 2,
+   "max_rssi": -49
+  },
+  {
+   "freq": 6115,
+   "band": "6",
+   "ch": 33,
+   "receive_s": 0.22,
+   "frames": 8,
+   "rate": 36.4,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6155,
+   "band": "6",
+   "ch": 41,
+   "receive_s": 0.22,
+   "frames": 9,
+   "rate": 40.9,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6175,
+   "band": "6",
+   "ch": 45,
+   "receive_s": 0.22,
+   "frames": 19,
+   "rate": 86.4,
+   "bss_primary": 1,
+   "bss_overlap": 2,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6195,
+   "band": "6",
+   "ch": 49,
+   "receive_s": 0.22,
+   "frames": 23,
+   "rate": 104.5,
+   "bss_primary": 1,
+   "bss_overlap": 2,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6215,
+   "band": "6",
+   "ch": 53,
+   "receive_s": 0.22,
+   "frames": 25,
+   "rate": 113.6,
+   "bss_primary": 1,
+   "bss_overlap": 2,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6235,
+   "band": "6",
+   "ch": 57,
+   "receive_s": 0.22,
+   "frames": 8,
+   "rate": 36.4,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6255,
+   "band": "6",
+   "ch": 61,
+   "receive_s": 0.22,
+   "frames": 10,
+   "rate": 45.5,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 5975,
+   "band": "6",
+   "ch": 5,
+   "receive_s": 0.22,
+   "frames": 47,
+   "rate": 213.6,
+   "bss_primary": 1,
+   "bss_overlap": 2,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6055,
+   "band": "6",
+   "ch": 21,
+   "receive_s": 0.22,
+   "frames": 11,
+   "rate": 50.0,
+   "bss_primary": 1,
+   "bss_overlap": 2,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6295,
+   "band": "6",
+   "ch": 69,
+   "receive_s": 0.22,
+   "frames": 0,
+   "rate": 0.0,
+   "bss_primary": 0,
+   "bss_overlap": 0,
+   "max_rssi": null
+  },
+  {
+   "freq": 6375,
+   "band": "6",
+   "ch": 85,
+   "receive_s": 0.22,
+   "frames": 0,
+   "rate": 0.0,
+   "bss_primary": 0,
+   "bss_overlap": 0,
+   "max_rssi": null
+  },
+  {
+   "freq": 5955,
+   "band": "6",
+   "ch": 1,
+   "receive_s": 0.22,
+   "frames": 8,
+   "rate": 36.4,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 5995,
+   "band": "6",
+   "ch": 9,
+   "receive_s": 0.22,
+   "frames": 8,
+   "rate": 36.4,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6015,
+   "band": "6",
+   "ch": 13,
+   "receive_s": 0.22,
+   "frames": 9,
+   "rate": 40.9,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6035,
+   "band": "6",
+   "ch": 17,
+   "receive_s": 0.22,
+   "frames": 9,
+   "rate": 40.9,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6075,
+   "band": "6",
+   "ch": 25,
+   "receive_s": 0.22,
+   "frames": 10,
+   "rate": 45.5,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6095,
+   "band": "6",
+   "ch": 29,
+   "receive_s": 0.22,
+   "frames": 9,
+   "rate": 40.9,
+   "bss_primary": 0,
+   "bss_overlap": 1,
+   "max_rssi": -52
+  },
+  {
+   "freq": 6275,
+   "band": "6",
+   "ch": 65,
+   "receive_s": 0.22,
+   "frames": 0,
+   "rate": 0.0,
+   "bss_primary": 0,
+   "bss_overlap": 0,
+   "max_rssi": null
+  },
+  {
+   "freq": 6315,
+   "band": "6",
+   "ch": 73,
+   "receive_s": 0.22,
+   "frames": 0,
+   "rate": 0.0,
+   "bss_primary": 0,
+   "bss_overlap": 0,
+   "max_rssi": null
+  },
+  {
+   "freq": 6335,
+   "band": "6",
+   "ch": 77,
+   "receive_s": 0.22,
+   "frames": 0,
+   "rate": 0.0,
+   "bss_primary": 0,
+   "bss_overlap": 0,
+   "max_rssi": null
+  },
+  {
+   "freq": 6355,
+   "band": "6",
+   "ch": 81,
+   "receive_s": 0.22,
+   "frames": 0,
+   "rate": 0.0,
+   "bss_primary": 0,
+   "bss_overlap": 0,
+   "max_rssi": null
+  },
+  {
+   "freq": 6395,
+   "band": "6",
+   "ch": 89,
+   "receive_s": 0.22,
+   "frames": 0,
+   "rate": 0.0,
+   "bss_primary": 0,
+   "bss_overlap": 0,
+   "max_rssi": null
+  },
+  {
+   "freq": 6415,
+   "band": "6",
+   "ch": 93,
+   "receive_s": 0.22,
+   "frames": 0,
+   "rate": 0.0,
+   "bss_primary": 0,
+   "bss_overlap": 0,
+   "max_rssi": null
+  }
+ ],
+ "label": {
+  "location": null,
+  "tags": [],
+  "memo": "",
+  "updated_at": null,
+  "updated_by": null
+ }
+}

@@ -176,12 +176,67 @@ def frame_cases() -> list[dict]:
     return cases
 
 
+def relay_samples() -> dict[str, object]:
+    """中継とのやりとりの見本。状態の写しと記録の写しは、偽の無線で実際に動かして作る。"""
+    import tempfile
+
+    from wifiwatch.app import build as build_app
+    from wifiwatch.clock import FakeClock
+    from wifiwatch.config import parse_config
+    from wifiwatch.radio.fake import FakeRadio, demo_scenario
+
+    root = HERE.parents[2]
+    d = json.loads((root / "config.example.json").read_text(encoding="utf-8"))
+    tmp = tempfile.mkdtemp(prefix="wifiwatch-gen-")
+    d["data_dir"] = tmp
+    d["signatures"] = str(root / "signatures.json")
+    clk = FakeClock()
+    app = build_app(parse_config(d), clk, FakeRadio(clk, demo_scenario()))
+    app.monitor.run_for(60)
+    res = app.controller.manual_scan(bands=["6"], origin="app", request_id="app-scan-0001")
+    app.monitor.run_for(8)
+    app.controller.command_status["app-scan-0001"]["at"] = 1_791_936_070.0
+    state = app.controller.compact_state()
+    rec = app.store.get_record(f"scan-{res['id']}")
+    rec.pop("updated_at", None)
+    app.store.close()
+    walk = {
+        "id": "walk-20261015-0001", "kind": "walk", "created_at": 1_791_936_100.0, "device": "pixel-9a",
+        "settings": {"seconds": 30, "height_m": 1.0, "app": "wifiwatch-android"},
+        "stations": [
+            {"bssid": "02:a0:00:00:00:01", "ssid": "KOSEN-A-6G", "freq": 5975, "ch": 5, "width": 20, "center0": None,
+             "rssi": -58, "standard": "ax", "ies_hex": build.ap_ies(F("6g5"), 20, "KOSEN-A-6G").hex(),
+             "primary_freq": 5975, "spans": [[5965.0, 5985.0]], "width_label": "20", "seen_us": 123456789},
+            {"bssid": "00:1d:73:11:22:33", "ssid": "Buffalo-6G-7A3F", "freq": 6195, "ch": 49, "width": 320,
+             "center0": 6105, "rssi": -55, "standard": "be", "ies_hex": None, "primary_freq": 6195,
+             "spans": [[5945.0, 6265.0]], "width_label": "320", "seen_us": 123456000},
+        ],
+        "label": {"location": "フィールド北", "tags": ["歩測"], "memo": "", "updated_at": 1_791_936_100.0},
+    }
+    return {
+        "app_command_scan.json": {"request_id": "app-scan-0001", "type": "scan", "params": {"bands": ["6"], "confirm": False}},
+        "app_command_bands.json": {"request_id": "app-bands-0001", "type": "bands",
+                                   "params": {"excluded_bands": ["2.4"], "excluded_freqs": [5180]}},
+        "app_label.json": {"request_id": "app-label-0001", "edited_at": 1_791_936_200.0,
+                           "label": {"location": "客席東", "tags": ["試合前", "下見"], "memo": "アプリから"}},
+        "app_walk.json": {"request_id": "app-walk-0001", "record": walk},
+        "pc_state.json": state,
+        "pc_record.json": rec,
+        "app_poll_response.json": {"now": 1_791_936_072_000, "state": state, "state_received_at": 1_791_936_071_000,
+                                   "state_age_ms": 1000},
+    }
+
+
 def main(out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / "ies_cases.json").write_text(json.dumps(ie_cases(), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     (out / "frame_cases.json").write_text(json.dumps(frame_cases(), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     channels = [{"freq": c.freq, "band": c.band, "number": c.number, "psc": c.is_psc} for c in ch.ALL_CHANNELS]
     (out / "channels.json").write_text(json.dumps(channels, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    rel = out / "relay"
+    rel.mkdir(exist_ok=True)
+    for name, data in relay_samples().items():
+        (rel / name).write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

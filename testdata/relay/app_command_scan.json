@@ -1,0 +1,10 @@
+{
+ "request_id": "app-scan-0001",
+ "type": "scan",
+ "params": {
+  "bands": [
+   "6"
+  ],
+  "confirm": false
+ }
+}
