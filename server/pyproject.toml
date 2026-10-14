@@ -1,0 +1,9 @@
+[project]
+name = "wifiwatch"
+version = "0.1.0"
+description = "NHK高専ロボコン向けWi-Fi監視（受信専用）"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

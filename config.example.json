@@ -1,0 +1,37 @@
+{
+  "interface": "wlan0",
+  "device_name": "pit-pc",
+  "own": {
+    "team": "自チーム",
+    "ssids": ["OUR-ROBOT-6G"],
+    "bssids": ["02:00:00:00:00:01"],
+    "station_macs": ["02:00:00:00:00:02"],
+    "channel": "6g37",
+    "width": 20,
+    "spare": ["6g41"],
+    "pmf_required": null
+  },
+  "teams": [
+    {"name": "A高専", "channels": ["6g5"], "spare": ["6g9"], "bssids": [], "ssids": ["KOSEN-A*"]},
+    {"name": "B高専", "channels": ["6g53"], "spare": ["6g57"], "bssids": [], "ssids": ["KOSEN-B*"]}
+  ],
+  "known_ok_bssids": [],
+  "locations": ["ピット", "フィールド北", "フィールド南", "客席東", "客席西"],
+  "notify": {
+    "ntfy_server": "https://ntfy.sh",
+    "ntfy_topic": null,
+    "discord_webhook": null,
+    "healthcheck_url": null,
+    "buzzer_device": null
+  },
+  "relay": {
+    "url": null,
+    "pc_token": null,
+    "idle_interval_s": 10,
+    "fg_interval_s": 2
+  },
+  "radio": {"kind": "fake"},
+  "api": {"host": "127.0.0.1", "port": 8080},
+  "data_dir": "data",
+  "signatures": "signatures.json"
+}

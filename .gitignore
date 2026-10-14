@@ -1,0 +1,27 @@
+# 秘密と実行時のデータ（コミットしない）
+/config.json
+/data/
+relay/.env
+relay/.env.local
+relay/.vercel/
+*.secret
+# Python
+server/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Node
+node_modules/
+relay/dist/
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/.kotlin/
+*.apk
+*.keystore
+# 通信内容は保存しない
+*.pcap
+*.pcapng

@@ -1,0 +1,156 @@
+[
+ {
+  "name": "beacon_6g_two_chains_fcs",
+  "hex": "000026002b4000a0200800a020080000e8030000000000001000f7170001ce000000cb00ca0180000000ffffffffffff021122334455021122334455000000000000000000006400110000084652414d452d364701088c129824b048606c05040001000007064a5004010d1430140100000fac040100000fac040100000fac08c000ff16230500181200100c20200200000000000000fafffaffff0c2404000201fcff2503272f06ff033bbd066783b332",
+  "expect": {
+   "freq": 6135,
+   "signal": -50,
+   "chains": [
+    -53,
+    -54
+   ],
+   "fcs_at_end": true,
+   "bad_fcs": false,
+   "ftype": 0,
+   "subtype": 8,
+   "retry": false,
+   "protected": false,
+   "bssid": "02:11:22:33:44:55",
+   "ssid": "FRAME-6G",
+   "primary_freq": 6135,
+   "width": 160
+  }
+ },
+ {
+  "name": "beacon_vendor_ns",
+  "hex": "00002b002a4000c0010000a0200800a02008000000003c140001c3000000001122000300aabbccc000c00180000000ffffffffffff02112233445502112233445500000000000000000000640011000003564e5301088c129824b048606c05040001000007064a5004010d1430140100000fac040100000fac040100000fac0280002d1aef091bffff0000000000000000000000000000000000000000003d1624000000000000000000000000000000000000000000bf0cb259820ffaff0000faff0020c005000000fcff",
+  "expect": {
+   "freq": 5180,
+   "signal": -61,
+   "chains": [
+    -64,
+    -64
+   ],
+   "fcs_at_end": false,
+   "bad_fcs": false,
+   "ftype": 0,
+   "subtype": 8,
+   "bssid": "02:11:22:33:44:55",
+   "ssid": "VNS"
+  }
+ },
+ {
+  "name": "beacon_single_signal_no_chains",
+  "hex": "000012002a40000000006c098000ba00000080000000ffffffffffff021122334455021122334455000000000000000000006400110000034f4e45010882848b960c12182403010105040001000007064a5004010d1430140100000fac040100000fac040100000fac0280002d1aef091bffff0000000000000000000000000000000000000000003d1601000000000000000000000000000000000000000000",
+  "expect": {
+   "freq": 2412,
+   "signal": -70,
+   "chains": [],
+   "ftype": 0,
+   "subtype": 8,
+   "ssid": "ONE"
+  }
+ },
+ {
+  "name": "deauth_plain",
+  "hex": "00001e002a4000a0200800a0200800001000f7170001d8000000d500d501c00000000266778899aa021122334455021122334455000007006c6aa881",
+  "expect": {
+   "freq": 6135,
+   "ftype": 0,
+   "subtype": 12,
+   "protected": false,
+   "addr1": "02:66:77:88:99:aa",
+   "addr2": "02:11:22:33:44:55",
+   "addr3": "02:11:22:33:44:55",
+   "reason": 7
+  }
+ },
+ {
+  "name": "disassoc_protected",
+  "hex": "00001e002a4000a0200800a0200800000000f7170001d8000000d500d501a04000000266778899aa02112233445502112233445500000000000000000000000000000000000000000000000000000000",
+  "expect": {
+   "freq": 6135,
+   "ftype": 0,
+   "subtype": 10,
+   "protected": true,
+   "addr1": "02:66:77:88:99:aa",
+   "addr2": "02:11:22:33:44:55"
+  }
+ },
+ {
+  "name": "data_to_ap_retry",
+  "hex": "00001e002a4000a0200800a0200800001000f7170001c9000000c600c601884900000211223344550266778899aa02112233445500000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee1d768627",
+  "expect": {
+   "freq": 6135,
+   "ftype": 2,
+   "subtype": 8,
+   "retry": true,
+   "protected": true,
+   "bssid": "02:11:22:33:44:55",
+   "client": "02:66:77:88:99:aa",
+   "hdr_len": 26
+  }
+ },
+ {
+  "name": "data_from_ap",
+  "hex": "00001e002a4000a0200800a0200800000000f7170001c9000000c600c601084200000266778899aa0211223344550211223344550000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "expect": {
+   "freq": 6135,
+   "ftype": 2,
+   "subtype": 0,
+   "retry": false,
+   "bssid": "02:11:22:33:44:55",
+   "client": "02:66:77:88:99:aa",
+   "hdr_len": 24
+  }
+ },
+ {
+  "name": "ack",
+  "hex": "00001e002a4000a0200800a0200800000000f7170001c4000000c100c101d40000000266778899aa",
+  "expect": {
+   "freq": 6135,
+   "ftype": 1,
+   "subtype": 13,
+   "addr1": "02:66:77:88:99:aa",
+   "addr2": null
+  }
+ },
+ {
+  "name": "rts",
+  "hex": "00001e002a4000a0200800a0200800000000f7170001c4000000c100c101b40000000211223344550266778899aa",
+  "expect": {
+   "freq": 6135,
+   "ftype": 1,
+   "subtype": 11,
+   "addr1": "02:11:22:33:44:55",
+   "addr2": "02:66:77:88:99:aa"
+  }
+ },
+ {
+  "name": "bad_fcs",
+  "hex": "00001e002a4000a0200800a0200800005000f7170001b0000000ad00ad01d40000000266778899aaf47329bf",
+  "expect": {
+   "freq": 6135,
+   "fcs_at_end": true,
+   "bad_fcs": true
+  }
+ },
+ {
+  "name": "vht_bw_160",
+  "hex": "00001e002a40200000003c140001c40000004000000b0000000000000000884100000211223344550266778899aa02112233445500000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "expect": {
+   "freq": 5180,
+   "ppdu_bw": 160,
+   "ftype": 2
+  }
+ },
+ {
+  "name": "he_bw_80",
+  "hex": "000026002b40800005000000000000000000f7170001c4000000004000000000000002000000884200000266778899aa02112233445502112233445500000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "expect": {
+   "freq": 6135,
+   "ppdu_bw": 80,
+   "ftype": 2
+  }
+ }
+]

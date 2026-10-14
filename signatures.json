@@ -1,0 +1,8 @@
+{
+  "_comment": "次の魔物はここに追記する（コードは触らない）。ssid は glob（* と ?）、oui は先頭3オクテット。kind: official_infra / broadcast / team / unknown。on_6ghz: notify_once / crit / none（省略時は kind から決める）。",
+  "signatures": [
+    {"name": "RoboconFree", "ssid": ["ROBOCON_Free_Wi-Fi*"], "oui": [], "kind": "official_infra", "negotiable": false, "on_6ghz": "notify_once"},
+    {"name": "RoboconStaff", "ssid": ["ROBOCON_Staff*"], "oui": [], "kind": "official_infra", "negotiable": false, "on_6ghz": "notify_once"},
+    {"name": "CineEye", "ssid": ["CineEye*"], "oui": [], "kind": "broadcast", "negotiable": false, "on_6ghz": "crit"}
+  ]
+}
