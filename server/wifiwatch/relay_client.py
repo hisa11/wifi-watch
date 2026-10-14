@@ -129,7 +129,11 @@ class RelayClient:
                 return  # 受け取った時点で期限を過ぎていれば実行しない（受け取ったことは返す）
             prev = self.ctl.command_status.get(rid)
             if prev is None:
-                self.ctl.command_status[rid] = {"state": "received", "at": now, "type": item.get("type")}
+                # 中継が受け付けてからPCが受け取るまでの秒（中継の時計どうし。実機の確認で使う）
+                delay = round(age / 1000.0, 1)
+                self.ctl.command_status[rid] = {"state": "received", "at": now, "type": item.get("type"), "delay_s": delay}
+                self.ctl.log_event("relay", "command", "info", rid, "アプリの指示を受け取った",
+                                   f"{item.get('type')}・中継で受け付けてから{delay}秒", "app", {"delay_s": delay})
             p = item.get("params") or {}
             try:
                 if item.get("type") == "scan":

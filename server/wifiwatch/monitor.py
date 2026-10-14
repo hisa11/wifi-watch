@@ -35,7 +35,10 @@ def make_radio(cfg: Config, clock: Clock) -> Radio:
         return RemoteRadio(cfg.radio.radiod_socket, clock)
     if kind == "linux":
         from .radio.linux import LinuxRadio
-        return LinuxRadio(cfg.interface, clock)
+        return LinuxRadio(cfg.interface, clock, monitor_flags=cfg.radio.monitor_flags)
+    if kind == "scan_only":
+        from .radio.scanonly import ScanOnlyRadio
+        return ScanOnlyRadio(cfg.interface, clock)
     raise ValueError(kind)
 
 
@@ -60,6 +63,11 @@ class Monitor:
             liveness_pick=self._pick_liveness,
         )
         self.radio = radio or make_radio(cfg, self.clock)
+        if hasattr(self.radio, "hello"):
+            try:
+                self.radio.hello()  # radiod の種類（スキャンだけのモードか）を知る
+            except Exception:
+                log.warning("radiod にまだ届きません（受信ループで再接続します）")
         self.engine = Engine(self.clock, self.radio, self.analyzer, self.scheduler, device=cfg.device_name)
         self.signatures = load_signatures(cfg.signatures)
         self.classifier = Classifier(cfg, self.signatures, oui if oui is not None else OuiDb(), tags)

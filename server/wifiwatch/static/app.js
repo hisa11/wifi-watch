@@ -469,6 +469,7 @@ function renderTop(st) {
 
 function blindSummary(st) {
   const out = [];
+  if (st.radio && st.radio.scan_only) out.push("活動量・リトライ率・deauth・160MHz受信（スキャンだけのモード）");
   for (const b of st.excluded_bands) out.push(`${BAND_JP[b]}（巡回外）`);
   const ex = st.excluded_freqs.filter((f) => !st.excluded_bands.includes(bandOf(f)));
   if (ex.length) out.push(`${ex.length}ch（巡回外）`);

@@ -203,3 +203,15 @@ def test_desktop_only_operations(env):
         app.controller.set_mode("PRE", origin="app")
     with pytest.raises(ControlError):
         app.controller.set_own(F("6g41"), 20, origin="app")
+
+
+def test_logs_written(env):
+    app, c, clk = env
+    app.monitor.run_for(25)
+    d = Path(app.cfg.data_dir)
+    ch_lines = (d / "channels.csv").read_text(encoding="utf-8").splitlines()
+    assert ch_lines[0].startswith("ts,freq,band") and len(ch_lines) >= 1 + 57 * 2
+    own = (d / "own.csv").read_text(encoding="utf-8").splitlines()
+    assert own[0] == "ts,bssid,ssid,freq,rssi,rssi_avg,seen_ago_s" and "02:00:00:00:00:01" in own[1]
+    ev = [json.loads(x) for x in (d / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert ev[0]["category"] == "system" and ev[0]["ts"].endswith("Z")

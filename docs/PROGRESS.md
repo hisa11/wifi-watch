@@ -131,6 +131,23 @@
 
 デプロイはまだしていない（`docs/relay.md` の手順でユーザーが行う）。
 
+## M7 実機の層（2026-10-15）
+
+やったこと
+- `radio/linux.py`：iw・ip・modprobe（検証した値と固定の語だけ、shellなし）とAF_PACKET（BPFでデータフレームをヘッダまでに切る）。tuneの書き方の候補と記憶、モニタ・管理モード、ドライバの読み込み直し、国設定と6GHzの確認、survey
+- `radio/radiod.py`：特権の補助プロセス（決まった操作だけ、値の検査、0660のソケット、uidの制限）。`radio/remote.py`：本体側の相手
+- `radio/nl80211.py`・`radio/scanonly.py`：合否ゲートが不合格のときの代わり（パッシブスキャン → 生のIE → 解析部へ）
+- `hwprobe.py`：実機の確認の道具
+- `deploy/gate.sh`（合否ゲート）、`deploy/setup.sh`（sudoの段は確認してから）、`deploy/ecosystem.config.js`（pm2：radiodはroot、本体は普通のユーザー）
+- `docs/HARDWARE_TEST.md`：手順と合否の基準と記録の表
+- 自APの強さの記録（`own.csv`）、指示が届くまでの秒のイベント
+
+テスト
+- PC側 203件 成功（M7で17件：コマンドの組み立て、iwの出力の読み取り、socketpairでの受信、radiod越しの無線と本体、不正な要求を断る、他のuidを断る、パッシブスキャンの代わり、netlinkの読み取り）
+- 開発PCで nl80211 の読み取りを本物のカーネルで確かめた（読むだけ、sudoなし）
+
+実機で動かすのはユーザー：`deploy/setup.sh` → `deploy/gate.sh` → `docs/HARDWARE_TEST.md` の順。
+
 ## 次にやること
 
-M7 実機の層：radiod（特権の小さな補助プロセス）と RemoteRadio、iw・ipの操作、合否ゲート、復旧、survey、`deploy/`、`docs/HARDWARE_TEST.md`。
+M8 アプリ：Androidの現行ドキュメントの確認、Gradleの雛形、6画面、モバイル回線への固定、溜めと再送、IE解析の照合。エミュレータには system image が要る（入れ方をユーザーに示す）。

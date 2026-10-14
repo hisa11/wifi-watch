@@ -23,6 +23,7 @@ class FileLogs:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.events_path = self.dir / "events.jsonl"
         self.channels_path = self.dir / "channels.csv"
+        self.own_path = self.dir / "own.csv"
         self.lock = threading.Lock()
 
     def event(self, ts: float, record: dict[str, Any]) -> None:
@@ -45,3 +46,23 @@ class FileLogs:
 
 def _n(v: Any) -> str:
     return "" if v is None else str(v)
+
+
+OWN_FIELDS = ["ts", "bssid", "ssid", "freq", "rssi", "rssi_avg", "seen_ago_s"]
+
+
+def _own_rows(rows: list[dict[str, Any]]) -> list[list[Any]]:
+    return [[r["bssid"], r.get("ssid") or "", r["freq"], _n(r.get("rssi")), _n(r.get("rssi_avg")), _n(r.get("seen_ago_s"))]
+            for r in rows]
+
+
+def write_own(logs: "FileLogs", ts: float, rows: list[dict[str, Any]]) -> None:
+    """自APの強さ（10秒ごと）。ピットとフィールドの差（約9dBの余裕）を自チームの試合中に実測するため。"""
+    new = not logs.own_path.exists() or os.path.getsize(logs.own_path) == 0
+    with logs.lock, open(logs.own_path, "a", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(OWN_FIELDS)
+        iso = utc_iso(ts)
+        for r in _own_rows(rows):
+            w.writerow([iso, *r])

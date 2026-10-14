@@ -206,8 +206,9 @@ class ApiConfig(_Strict):
 
 
 class RadioConfig(_Strict):
-    kind: Literal["fake", "linux", "radiod"] = "fake"
+    kind: Literal["fake", "linux", "radiod", "scan_only"] = "fake"
     radiod_socket: str = "/run/wifiwatch/radiod.sock"
+    monitor_flags: list[Literal["fcsfail", "control", "otherbss"]] = []  # linux のとき（radiod は起動の引数で渡す）
     fake_scenario: str | None = None  # 偽の無線のシナリオ（JSONファイル）。無ければ組み込みの見本
 
 

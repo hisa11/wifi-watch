@@ -88,6 +88,8 @@ class SurveyEntry:
 class Radio(ABC):
     """受信だけを行う無線。tune → capture を繰り返す。"""
 
+    scan_only = False  # 合否ゲートが不合格のときの代わり（管理モードのパッシブスキャン）で動いているか
+
     @abstractmethod
     def tune(self, tuning: Tuning) -> None: ...
 

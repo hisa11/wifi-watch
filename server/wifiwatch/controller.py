@@ -20,7 +20,7 @@ from .analyzer.alerts import AlertEvent
 from .analyzer.occupancy import OccupancyContext, channel_rows, present_stations, suggestions
 from .clock import Clock, jst_str, utc_iso
 from .config import Config
-from .logs import FileLogs
+from .logs import FileLogs, write_own
 from .monitor import Monitor
 from .scheduler import Busy, ManualScan, NeedsConfirm, SchedulerError
 from .store import Store
@@ -121,7 +121,17 @@ class Controller:
             f(rec)
 
     def _write_channels(self, now_mono: float) -> None:
-        self.logs.channels(self.clock.time(), channel_rows(self._occ(), now_mono))
+        ts = self.clock.time()
+        self.logs.channels(ts, channel_rows(self._occ(), now_mono))
+        own = []
+        for b in self.cfg.own.bssids:
+            st = self.mon.analyzer.table.get(b)
+            if st is not None:
+                own.append({"bssid": b, "ssid": st.ssid, "freq": st.primary_freq, "rssi": st.rssi,
+                            "rssi_avg": None if st.rssi_avg is None else round(st.rssi_avg, 1),
+                            "seen_ago_s": round(now_mono - st.last_seen_mono, 1)})
+        if own:
+            write_own(self.logs, ts, own)
 
     def _occ(self) -> OccupancyContext:
         return OccupancyContext(self.cfg, self.mon.analyzer, self.mon.scheduler, self.mon.liveness.state)
@@ -475,6 +485,7 @@ class Controller:
             "thresholds": {"strong_rssi_dbm": self.cfg.thresholds.strong_rssi_dbm,
                            "problem_min": self.cfg.thresholds.problem_channel_min_strong},
             "counters": dict(mon.analyzer.counters),
+            "radio": {"kind": self.cfg.radio.kind, "scan_only": bool(getattr(mon.radio, "scan_only", False))},
             "clients": sum(1 for c in list(mon.analyzer.table.clients.values()) if now - c.last_seen < 900),
         }
 

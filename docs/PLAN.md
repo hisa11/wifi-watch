@@ -105,10 +105,10 @@ Wi-Fiは局・ch・時間で膨大になりやすい。デスクトップの画�
 
 ## M7 実機の層
 
-- [ ] radiod（特権の小さな補助プロセス）と、その相手（RemoteRadio）
-- [ ] iw・ipの操作（検証した値だけ）、合否ゲート、復旧、survey dump、fcsfail
-- [ ] `deploy/`：合否ゲートのスクリプト、セットアップ、NetworkManagerの管理外、pm2の設定
-- [ ] `docs/HARDWARE_TEST.md`
+- [x] radiod（特権の小さな補助プロセス）と、その相手（RemoteRadio）
+- [x] iw・ipの操作（検証した値だけ）、合否ゲート、復旧、survey dump、fcsfail
+- [x] `deploy/`：合否ゲートのスクリプト、セットアップ、NetworkManagerの管理外、pm2の設定
+- [x] `docs/HARDWARE_TEST.md`
 
 ## M8 アプリ
 
