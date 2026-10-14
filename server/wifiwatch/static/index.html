@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wifiwatch ピット</title>
+<link rel="stylesheet" href="/static/style.css">
+<script type="module" src="/static/app.js"></script>
+</head>
+<body>
+<div id="offline" class="offline" hidden>PCのAPIに届きません。表示は最後に受け取った状態です。</div>
+
+<header class="topbar" id="topbar">
+  <div class="verdict" id="verdict" role="status" aria-live="polite">
+    <span class="verdict-icon" aria-hidden="true">–</span>
+    <span class="verdict-text">読み込み中</span>
+    <span class="verdict-sub"></span>
+  </div>
+  <div class="own-summary" id="ownSummary"></div>
+  <div class="rx-state" id="rxState"></div>
+  <div class="mode-switch" id="modeSwitch" role="radiogroup" aria-label="モード">
+    <button type="button" data-mode="PRE" role="radio">PRE<small>下見</small></button>
+    <button type="button" data-mode="LIVE" role="radio">LIVE<small>既定</small></button>
+    <button type="button" data-mode="QUIET" role="radio">QUIET<small>山場</small></button>
+  </div>
+  <div class="coverage" id="coverage"></div>
+  <div class="links" id="links"></div>
+  <div class="clock" id="clock">--:--:--</div>
+</header>
+
+<div class="scanbar" id="scanbar" hidden></div>
+
+<main class="layout">
+  <section class="spectrum card" aria-labelledby="h6">
+    <div class="card-head">
+      <h2 id="h6">6GHz <span class="sub">アナライザー（ch×強さ。台形の幅が宣言された帯域幅）</span></h2>
+      <div class="head-stats" id="stats6"></div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="chart chart-6" id="chart6"></div>
+  </section>
+
+  <aside class="side">
+    <section class="card alerts" aria-labelledby="hAlerts">
+      <div class="card-head"><h2 id="hAlerts">発生中の警報</h2><span class="sub" id="alertsSub"></span></div>
+      <div id="alerts"></div>
+    </section>
+    <section class="card" aria-labelledby="hOwn">
+      <div class="card-head"><h2 id="hOwn">自chの活動量</h2><span class="sub" id="ownSub"></span></div>
+      <div id="ownTile"></div>
+    </section>
+    <section class="card" aria-labelledby="hSug">
+      <div class="card-head"><h2 id="hSug">回避先の候補</h2><span class="sub">ピットから見た参考値</span></div>
+      <ol class="suggestions" id="suggestions"></ol>
+    </section>
+    <section class="card" id="calCard" hidden aria-labelledby="hCal">
+      <div class="card-head"><h2 id="hCal">PREの下見のまとめ</h2><span class="sub" id="calSub"></span></div>
+      <div id="calibration"></div>
+    </section>
+  </aside>
+
+  <section class="spectrum-small card area-five" aria-labelledby="h5">
+    <div class="card-head"><h2 id="h5">5GHz</h2><div class="head-stats" id="stats5"></div></div>
+    <div class="chart chart-small" id="chart5"></div>
+  </section>
+  <section class="spectrum-small card area-two4" aria-labelledby="h24">
+    <div class="card-head"><h2 id="h24">2.4GHz</h2><div class="head-stats" id="stats24"></div></div>
+    <div class="chart chart-small" id="chart24"></div>
+  </section>
+
+  <section class="card lower">
+    <nav class="tabs" role="tablist" id="tabs">
+      <button role="tab" data-tab="stations" aria-selected="true">局 <span class="count" id="cntStations"></span></button>
+      <button role="tab" data-tab="clients">端末 <span class="count" id="cntClients"></span></button>
+      <button role="tab" data-tab="records">記録</button>
+      <button role="tab" data-tab="events">イベント</button>
+      <button role="tab" data-tab="patrol">巡回と手動スキャン</button>
+      <button role="tab" data-tab="settings">設定</button>
+    </nav>
+    <div class="tabpanel" data-panel="stations" id="pStations"></div>
+    <div class="tabpanel" data-panel="clients" id="pClients" hidden></div>
+    <div class="tabpanel" data-panel="records" id="pRecords" hidden></div>
+    <div class="tabpanel" data-panel="events" id="pEvents" hidden></div>
+    <div class="tabpanel" data-panel="patrol" id="pPatrol" hidden></div>
+    <div class="tabpanel" data-panel="settings" id="pSettings" hidden></div>
+  </section>
+</main>
+
+<aside class="drawer" id="drawer" hidden aria-labelledby="drawerTitle">
+  <div class="drawer-head">
+    <h2 id="drawerTitle">局の詳細</h2>
+    <button type="button" class="icon-btn" id="drawerClose" aria-label="閉じる">×</button>
+  </div>
+  <div id="drawerBody"></div>
+</aside>
+
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<dialog id="confirm">
+  <form method="dialog">
+    <h3 id="confirmTitle">確認</h3>
+    <p id="confirmText"></p>
+    <menu>
+      <button value="cancel" type="submit" class="btn">やめる</button>
+      <button value="ok" type="submit" class="btn primary" id="confirmOk">実行する</button>
+    </menu>
+  </form>
+</dialog>
+</body>
+</html>

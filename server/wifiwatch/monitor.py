@@ -48,7 +48,11 @@ class Monitor:
         self.clock = clock or RealClock()
         self.overrides = overrides or Overrides(Path(cfg.data_dir) / "overrides.json")
         ov = self.overrides.snapshot()
-        own_freq = ov.get("own_channel") or cfg.own.channel
+        if ov.get("own_channel"):  # 画面で変えた自chを、設定の値より優先する
+            cfg.own.channel = ov["own_channel"]
+            if ov.get("own_width") in ch.valid_widths(cfg.own.channel):
+                cfg.own.width = ov["own_width"]
+        own_freq = cfg.own.channel
         self.analyzer = Analyzer(self.clock, list(cfg.own.bssids) + list(cfg.own.station_macs))
         self.scheduler = Scheduler(
             cfg.schedule, self.clock, own_freq, cfg.own.spare, ov.get("mode", "LIVE"),
@@ -66,8 +70,6 @@ class Monitor:
         self.liveness = LivenessMonitor(self.clock, self.engine, th.liveness_empty_cycles)
         self.detector = Detector(cfg, self.clock, self.analyzer, self.scheduler, self.classifier, self.alerts,
                                  self.signatures, rx_status=self.liveness.status)
-        if ov.get("own_width"):
-            self.detector.own_width = ov["own_width"]
         self.on_alert_event: list[Callable[[AlertEvent], None]] = []
         self.on_calibration: list[Callable[[dict[str, Any]], None]] = []
         self.calibration: dict[str, Any] | None = None

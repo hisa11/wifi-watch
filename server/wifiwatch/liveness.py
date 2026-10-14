@@ -89,7 +89,7 @@ class LivenessMonitor:
         if slots == 0:
             return
         if frames > 0:
-            if self.state != "ok":
+            if self.step >= 1 or self.state == "failed":  # 様子見から戻っただけなら記録しない
                 self._note("recovered", after_step=self.step)
             self.state, self.step, self.empty, self.reason = "ok", 0, 0, ""
             self.failed_since = None

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "wifiwatch-fake",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd server && exec .venv/bin/python -m wifiwatch --config ../config.json"],
+      "port": 8080
+    }
+  ]
+}
