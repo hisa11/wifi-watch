@@ -103,9 +103,9 @@ class NotifyConfig(_Strict):
     @field_validator("ntfy_server", "discord_webhook", "healthcheck_url")
     @classmethod
     def _https(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError(f"「{v}」は https:// で始めてください")
-        return v
+        if v is None or v.startswith("https://") or re.match(r"^http://(127\.0\.0\.1|localhost)(:\d+)?(/|$)", v):
+            return v  # http はテスト用のループバックだけ
+        raise ValueError(f"「{v}」は https:// で始めてください")
 
 
 class RelayConfig(_Strict):

@@ -76,6 +76,17 @@
 - PC側 149件 成功（M3で51件：警報37、受信停止8、分類6）
 - 完了条件：警報ごとに鳴るべき場面と鳴ってはいけない場面のテストあり。静かな6GHzで受信停止が鳴らない（`test_quiet_6ghz_is_not_receive_stop`）。PRE→LIVEで活動量が鳴らない（`test_pre_to_live_switch_does_not_fire_activity`）。
 
+## M4 通知（2026-10-15）
+
+やったこと
+- `store.py`：SQLiteの土台（kv、通知と中継の待ち行列、イベント、記録、処理済みの要求ID、手動タグの表）
+- `notify.py`：ntfy（JSONで送る）とDiscord、レベルごとの宛先と優先度、再起動しても消えない待ち行列と無期限の再送（順番を守る、2〜60秒で待つ、429はRetry-After）、稼働中通知（起動時と15分ごと、15分で捨てる）、死活監視へ1分ごと、警報音（`docs/buzzer.md`）
+- `tests/fakehttp.py`：偽のHTTPサーバ（127.0.0.1だけ）
+
+テスト
+- PC側 159件 成功（M4で10件）
+- 完了条件：偽のHTTPサーバを止めて警報を溜め、PCを作り直して（再起動）、サーバを戻すと、全部が入れた順に届く（`test_outage_then_recovery_loses_nothing_even_across_restart`）。偽の無線 → 警報 → ntfy・Discord・警報音まで通る。
+
 ## 次にやること
 
-M4 通知：ntfy・Discord、抑制は警報側で済み、無期限の再送（再起動しても消えない待ち行列）、稼働中通知、死活監視、警報音。
+M5 保存・ローカルAPI・画面：記録とラベル、events.jsonl・channels.csv、controller、ローカルAPI（Host・独自ヘッダの検査）、ダッシュボード。
