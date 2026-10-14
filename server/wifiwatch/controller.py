@@ -129,7 +129,7 @@ class Controller:
     # ------------------------------------------------------------ 冪等
     def _idempotent(self, request_id: str | None, fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         if request_id is not None:
-            if not isinstance(request_id, str) or not (1 <= len(request_id) <= 64) or not re.match(r"^[A-Za-z0-9_\-]+$", request_id):
+            if not isinstance(request_id, str) or not (1 <= len(request_id) <= 80) or not re.match(r"^[A-Za-z0-9_\-]+$", request_id):
                 raise ControlError(400, "bad_request_id", "request_id が不正です")
             with self.lock:
                 if self.store.request_seen(request_id):
@@ -477,3 +477,47 @@ class Controller:
             "counters": dict(mon.analyzer.counters),
             "clients": sum(1 for c in list(mon.analyzer.table.clients.values()) if now - c.last_seen < 900),
         }
+
+    # ------------------------------------------------------------ 中継に置く状態の写し（8KB以下）
+    STATE_CODES = {"own": "o", "in_block": "i", "patrol": "p", "excluded": "x", "paused": "z", "scanning": "s",
+                   "scan_target": "t", "stopped": "!"}
+
+    def compact_state(self, limit: int = 7600) -> dict[str, Any]:
+        now_m = self.clock.monotonic()
+        mon = self.mon
+        s = mon.scheduler
+        st = s.status()
+        alerts = mon.alerts.active()
+        rows = channel_rows(self._occ(), now_m)
+        chans = []
+        for r in rows:
+            code = self.STATE_CODES.get(r["state"], "p")
+            if r["observed_ago"] is None and code in ("p", "i"):
+                code = "u"  # まだ一度も見ていない
+            chans.append([r["freq"], code, r["n_overlap"], r["max_rssi"], r["n_strong"]])
+        cmds = dict(list(self.command_status.items())[-20:])
+        out: dict[str, Any] = {
+            "v": 1, "at": round(self.clock.time(), 1), "device": self.cfg.device_name,
+            "mode": s.mode,
+            "own": {"freq": s.own_freq, "label": ch.label(s.own_freq), "width": self.cfg.own.width,
+                    "ratio": st["own_ratio"], "block": st["own_block"]["label"], "block_freqs": st["own_block"]["freqs"]},
+            "rx": {"state": mon.liveness.state, "reason": mon.liveness.reason[:120]},
+            "counts": {"crit": sum(1 for a in alerts if a.level == "crit"), "warn": sum(1 for a in alerts if a.level == "warn")},
+            "alerts": [{"level": a.level, "type": a.type, "title": a.title, "message": a.message[:160],
+                        "since": round(a.first_epoch)} for a in alerts[:8]],
+            "manual": s.manual_status(),
+            "bands": {"excluded_bands": sorted(s.excluded_bands), "excluded_freqs": sorted(s.excluded_freqs)},
+            "commands": cmds,
+            "channels": chans,
+        }
+        if out["manual"]:
+            out["manual"] = {k: out["manual"][k] for k in ("id", "state", "origin", "request_id", "done", "total", "remaining_s")}
+        size = len(json.dumps(out, ensure_ascii=False).encode("utf-8"))
+        if size > limit:
+            for a in out["alerts"]:
+                a["message"] = a["message"][:60]
+            out["alerts"] = out["alerts"][:4]
+            size = len(json.dumps(out, ensure_ascii=False).encode("utf-8"))
+        if size > limit:
+            out.pop("channels")
+        return out

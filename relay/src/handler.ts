@@ -94,6 +94,7 @@ export async function readJson(req: Request, maxBytes: number): Promise<unknown>
   if (len > maxBytes) throw new HttpError(413, "too_large", `本文が大きすぎます（上限 ${maxBytes} バイト）`);
   const buf = await req.arrayBuffer();
   if (buf.byteLength > maxBytes) throw new HttpError(413, "too_large", `本文が大きすぎます（上限 ${maxBytes} バイト）`);
+  if (buf.byteLength === 0) return undefined;
   try {
     return JSON.parse(new TextDecoder().decode(buf));
   } catch {
