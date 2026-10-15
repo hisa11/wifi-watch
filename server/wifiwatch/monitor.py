@@ -55,6 +55,11 @@ class Monitor:
             cfg.own.channel = ov["own_channel"]
             if ov.get("own_width") in ch.valid_widths(cfg.own.channel):
                 cfg.own.width = ov["own_width"]
+        # 画面で登録した自チームのAP（MACアドレス・SSID）を、設定の値より優先する
+        if ov.get("own_bssids") is not None:
+            cfg.own.bssids = list(ov["own_bssids"])
+        if ov.get("own_ssids") is not None:
+            cfg.own.ssids = list(ov["own_ssids"])
         own_freq = cfg.own.channel
         self.analyzer = Analyzer(self.clock, list(cfg.own.bssids) + list(cfg.own.station_macs))
         self.scheduler = Scheduler(

@@ -436,3 +436,11 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 @media (forced-colors: active) {
   .st-shape { forced-color-adjust: none; }
 }
+
+/* 自チームのAP（設定のタブ） */
+.own-ap h4 { margin: 12px 0 4px; font-size: 13px; color: var(--ink-2); }
+.own-chip { display: inline-flex; align-items: center; gap: 4px; }
+.own-chip .chip-x { border: 0; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1; }
+.own-chip .chip-x:hover { color: var(--crit); }
+.own-ap-list { max-height: 320px; overflow: auto; }
+.own-ap-list .btn { padding: 2px 8px; font-size: 12px; }

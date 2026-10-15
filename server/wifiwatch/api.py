@@ -153,6 +153,12 @@ def create_app(ctl: Controller, port: int) -> FastAPI:
         d = await body(request)
         return ctl.tag(str(d.get("bssid", "")).lower(), d.get("team"), "desktop")
 
+    # 自チームのAP：MACアドレス（BSSID）かSSIDで登録する（デスクトップだけ）
+    @app.post("/api/own_ap")
+    async def own_ap(request: Request) -> Any:
+        d = await body(request)
+        return ctl.set_own_ap(d.get("bssids", []), d.get("ssids", []), "desktop")
+
     # 機種の覚え帳：指紋ごとに機種の名前を覚える（同じ指紋の局にも出る）。label を null にすると忘れる
     @app.get("/api/models")
     def models() -> Any:

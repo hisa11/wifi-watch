@@ -190,6 +190,33 @@ def test_own_channel_change_and_tag(env):
     assert app.store.tags()["00:1d:73:11:22:33"] == "C高専"
 
 
+def test_own_ap_by_mac_or_ssid(env, tmp_path):
+    app, c, clk = env
+    st = lambda b: c.get(f"/api/stations/{b}").json()
+    # 見本は MACアドレス 02:00:00:00:00:01（OUR-ROBOT-6G）で登録してある
+    assert c.get("/api/state").json()["own"]["ap"]["match"] == "bssid"
+    # 周辺の局から選ぶ：A高専のAPを MACアドレスで自チームに（大文字・ハイフンでも読める）
+    r = c.post("/api/own_ap", json={"bssids": ["02-A0-00-00-00-01"], "ssids": []}, headers=W)
+    assert r.status_code == 200 and r.json() == {"bssids": ["02:a0:00:00:00:01"], "ssids": [], "match": "bssid"}
+    assert st("02:a0:00:00:00:01")["kind"] == "own" and st("02:00:00:00:00:01")["kind"] != "own"
+    # SSIDだけ：その名前の局はすべて自チーム
+    r = c.post("/api/own_ap", json={"bssids": [], "ssids": ["OUR-ROBOT-6G"]}, headers=W)
+    assert r.json()["match"] == "ssid" and st("02:00:00:00:00:01")["kind"] == "own"
+    # 手で入力した値の検査。アプリ・中継からは変えられない
+    assert c.post("/api/own_ap", json={"bssids": ["zz:zz"], "ssids": []}, headers=W).status_code == 400
+    assert c.post("/api/own_ap", json={"bssids": [], "ssids": ["x" * 33]}, headers=W).status_code == 400
+    assert c.post("/api/own_ap", json={"bssids": [], "ssids": ["OUR"]}).status_code == 403  # 独自ヘッダが要る
+    with pytest.raises(Exception):
+        app.controller.set_own_ap([], ["OUR"], "app")
+    # 再起動しても残る（overrides.json）
+    from wifiwatch.monitor import Monitor
+    cfg2 = parse_config(json.loads((ROOT / "config.example.json").read_text(encoding="utf-8")) | {"data_dir": app.cfg.data_dir})
+    m2 = Monitor(cfg2, FakeClock(), FakeRadio(FakeClock(), demo_scenario()), overrides=app.monitor.overrides)
+    assert m2.cfg.own.bssids == [] and m2.cfg.own.ssids == ["OUR-ROBOT-6G"]
+    ev = [e for e in c.get("/api/events?limit=20").json() if e.get("title") == "自チームのAP"]
+    assert ev and "SSID OUR-ROBOT-6G" in ev[0]["message"]
+
+
 def test_model_book_api(env):
     app, c, clk = env
     st = c.get("/api/stations/02:a0:00:00:00:01").json()  # KOSEN-A-6G（見本）

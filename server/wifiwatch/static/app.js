@@ -799,7 +799,7 @@ function drawerControls(body, d) {
     } });
     body.append(h("section", null, h("h3", { text: "機種を覚える（覚え帳）" }),
       h("p", { class: "sub", text: `指紋 ${d.model_fp}（IEの並びと能力から作る）。覚えると、同じ指紋の局にも同じ機種と出ます。見えた局の情報は外に送りません。` }),
-      h("div", { class: "toolbar" }, inp, remember, d.model_book ? forget : null)));
+      h("div", { class: "toolbar" }, ...[inp, remember, d.model_book ? forget : null].filter(Boolean))));
   }
   // チーム名のタグ
   const teams = (ui.state?.teams || []).map((t) => t.name);
@@ -1131,7 +1131,8 @@ function renderSettings() {
   } });
   const theme = segControl([["auto", "OSに合わせる"], ["light", "明るい"], ["dark", "暗い"]], prefs.get("theme", "auto"), (v) => { prefs.set("theme", v); applyTheme(); });
   el.append(
-    h("h3", { text: "自分のch（再起動なしで変更）" }), h("div", { class: "toolbar" }, chSel, wSel, apply),
+    h("h3", { text: "自チームのWi-Fi（AP）" }), buildOwnAp(),
+    h("h3", { style: "margin-top:14px", text: "自分のch（再起動なしで変更）" }), h("div", { class: "toolbar" }, chSel, wSel, apply),
     h("h3", { style: "margin-top:14px", text: "画面の明るさ" }), theme,
     h("h3", { style: "margin-top:14px", text: "チームと予約ch（config.json）" }), h("div", { id: "setTeams" }),
     h("h3", { style: "margin-top:14px", text: "通知と中継" }), h("div", { id: "setLinks" }),
@@ -1161,12 +1162,123 @@ async function renderModelBook() {
     const a = h("a", { href: URL.createObjectURL(blob), download: "model_book_export.json" });
     document.body.append(a); a.click(); a.remove();
   } });
-  clear(el).append(
+  clear(el).append(...[
     h("p", { class: "sub", text: `覚え帳 ${b.entries.length}件・機種の表 ${b.rules}行（models.json）。局の詳細の「機種を覚える」で増やせます。` }),
-    b.entries.length ? h("div", { class: "table-wrap" }, t) : null, h("div", { class: "toolbar" }, dl));
+    b.entries.length ? h("div", { class: "table-wrap" }, t) : null, h("div", { class: "toolbar" }, dl)].filter(Boolean));
 }
+// ------------------------------------------------------------------ 自チームのAP（MACアドレスかSSIDで登録）
+const OWN_AP_MODE = {
+  bssid: "MACアドレス（BSSID）で見分けています。登録したAPだけが自チームです。同じSSIDの別の局は「SSIDのなりすまし」の警報になります。",
+  ssid: "SSIDで見分けています。この名前の局はすべて自チームです（ルータを替えても追従します）。MACアドレスを1つでも登録すると、MACアドレスで見分けます。",
+  none: "未設定です。自チームのAPを見分けられません（自APの強さの記録、なりすましの見張りが使えません）。",
+};
+
+async function saveOwnAp(bssids, ssids, msg) {
+  try {
+    const r = await api("/api/own_ap", { method: "POST", body: { bssids, ssids } });
+    if (ui.state) ui.state.own.ap = r;
+    renderOwnApCurrent();
+    toast(msg);
+    // 周辺の一覧の「種類」（自チームか）は、次に状態を読んでから描き直す
+    setTimeout(() => ui.ownApNearby && ui.ownApNearby(), 2500);
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
+}
+
+function buildOwnAp() {
+  const wrap = h("div", { class: "own-ap" });
+  // 手で入力
+  const kind = h("select", { "aria-label": "入力する種類" }, h("option", { value: "bssid", text: "MACアドレス" }), h("option", { value: "ssid", text: "SSID" }));
+  const val = h("input", { type: "text", maxlength: 40, placeholder: "例：aa:bb:cc:dd:ee:ff または OUR-ROBOT-6G", "aria-label": "MACアドレスかSSID" });
+  const add = h("button", { class: "btn primary", type: "button", text: "追加", onclick: async () => {
+    const ap = ui.state.own.ap;
+    const v = val.value.trim();
+    if (!v) return toast("MACアドレスかSSIDを入れてください", true);
+    const ok = kind.value === "bssid"
+      ? await saveOwnAp([...ap.bssids, v], ap.ssids, `MACアドレス ${v} を自チームにしました`)
+      : await saveOwnAp(ap.bssids, [...ap.ssids, v], `SSID「${v}」を自チームにしました`);
+    if (ok) val.value = "";
+  } });
+  // 周辺のWi-Fiから選ぶ（押したときの一覧。2秒ごとには並べ替えない）
+  const q = h("input", { type: "search", placeholder: "SSID・MACアドレス・機種で絞り込み", "aria-label": "周辺のWi-Fiを絞り込み" });
+  const list = h("div", { class: "table-wrap own-ap-list" });
+  const refresh = h("button", { class: "btn", type: "button", text: "周辺のWi-Fiを読み直す", onclick: () => renderOwnApNearby(list, q.value) });
+  q.addEventListener("input", () => renderOwnApNearby(list, q.value));
+  ui.ownApNearby = () => renderOwnApNearby(list, q.value);
+  wrap.append(h("div", { id: "ownApCurrent" }),
+    h("div", { class: "toolbar" }, kind, val, add),
+    h("h4", { text: "周辺のWi-Fiから選ぶ（強い順）" }), h("div", { class: "toolbar" }, q, refresh), list);
+  setTimeout(() => { renderOwnApCurrent(); renderOwnApNearby(list, ""); }, 0);
+  return wrap;
+}
+
+function renderOwnApCurrent() {
+  const el = $("ownApCurrent");
+  if (!el || !ui.state) return;
+  const ap = ui.state.own.ap;
+  const seen = (ui.state.stations || []).filter((q2) => q2.kind === "own" && q2.present);
+  // ボタンのある部分は、登録が変わったときだけ作り直す（2秒ごとに作り直すと、押した瞬間のボタンが消えることがある）
+  const key = JSON.stringify(ap);
+  if (el.dataset.key !== key) {
+    el.dataset.key = key;
+    const chips = h("div", { class: "toolbar" });
+    const chip = (label, title, onRemove) => h("span", { class: "party own-chip", title },
+      h("span", { text: label }), h("button", { type: "button", class: "chip-x", "aria-label": `${label} を外す`, text: "×", onclick: onRemove }));
+    for (const b of ap.bssids) chips.append(chip(`MAC ${b}`, "このAPだけが自チーム", () => saveOwnAp(ap.bssids.filter((x) => x !== b), ap.ssids, `MACアドレス ${b} を外しました`)));
+    for (const x of ap.ssids) chips.append(chip(`SSID ${x}`, ap.match === "bssid" ? "なりすましの見張りに使う（同じSSIDの別の局を警報に）" : "この名前の局はすべて自チーム",
+      () => saveOwnAp(ap.bssids, ap.ssids.filter((y) => y !== x), `SSID「${x}」を外しました`)));
+    clear(el).append(h("p", { class: "sub", text: OWN_AP_MODE[ap.match] }), chips, h("p", { class: "sub", id: "ownApSeen" }));
+  }
+  $("ownApSeen").textContent = seen.length
+    ? `いま見えている自チームのAP：${seen.map((x) => `${ssidText(x)}（${chLabel(x.freq)}・${x.rssi}dBm）`).join("、")}`
+    : "いま見えている自チームのAPはありません";
+}
+
+function renderOwnApNearby(list, filter) {
+  const st = ui.state;
+  if (!st) return;
+  const f = filter.trim().toLowerCase();
+  const rows = st.stations.filter((x) => x.present && x.rssi != null)
+    .filter((x) => !f || [x.ssid, x.bssid, x.model].some((v) => v && v.toLowerCase().includes(f)))
+    .sort((a, b) => b.rssi - a.rssi).slice(0, 60);
+  const t = h("table", { class: "data" }, h("thead", null, h("tr", null,
+    ...["強さ", "SSID", "MACアドレス", "主ch・幅", "種類・機種", ""].map((x) => h("th", { text: x })))));
+  const tb = h("tbody");
+  for (const x of rows) {
+    const k = kindOf(x.kind);
+    const ap = st.own.ap;
+    const byMac = h("button", { class: "btn", type: "button", text: "MACで登録", disabled: ap.bssids.includes(x.bssid), onclick: (ev) => { ev.stopPropagation(); pickOwnAp(x, "bssid"); } });
+    const bySsid = h("button", { class: "btn", type: "button", text: "SSIDで登録", disabled: !x.ssid || ap.ssids.includes(x.ssid), title: x.ssid ? "" : "非公開SSIDはSSIDで登録できません", onclick: (ev) => { ev.stopPropagation(); pickOwnAp(x, "ssid"); } });
+    tb.append(h("tr", null,
+      h("td", { class: "num", text: x.rssi }), h("td", { text: ssidText(x) }), h("td", { class: "mono", text: x.bssid }),
+      h("td", { text: `${chLabel(x.freq)}・${x.width_label}MHz` }),
+      h("td", null, h("span", { class: `glyph ${k.cls}`, text: k.glyph + " " }), h("span", { text: `${k.label}${x.model ? `・${x.model}` : ""}` })),
+      h("td", { class: "wrap" }, byMac, " ", bySsid)));
+  }
+  t.append(tb);
+  clear(list).append(rows.length ? t : h("p", { class: "sub", text: "当てはまる局がありません（いる局だけ）" }));
+}
+
+/** 周辺の局を自チームに登録する。自chと違えば、自chも合わせるか聞く。 */
+async function pickOwnAp(x, by) {
+  const ap = ui.state.own.ap;
+  const ok = by === "bssid"
+    ? await saveOwnAp([...ap.bssids, x.bssid], ap.ssids, `${ssidText(x)}（${x.bssid}）を自チームにしました`)
+    : await saveOwnAp(ap.bssids, [...ap.ssids, x.ssid], `SSID「${x.ssid}」を自チームにしました`);
+  if (!ok) return;
+  const own = ui.state.own;
+  if (x.freq !== own.freq || x.width !== own.width) {
+    const go = await confirmDialog("自chも合わせますか？", `この局は ${chLabel(x.freq)}・${x.width}MHz です（いまの自chは ${own.label}・${own.width}MHz）。自chを変えると、監視する範囲（自ブロック）と警報の基準が変わります。`, "合わせる");
+    if (go) {
+      try { await api("/api/own", { method: "POST", body: { channel: x.freq, width: x.width } }); toast("自chも合わせました"); ui.bands = null; }
+      catch (e) { toast(e.message, true); }
+    }
+  }
+}
+
 function renderSettingsLive() {
   const st = ui.state;
+  renderOwnApCurrent();
   const t = h("table", { class: "data" }, h("thead", null, h("tr", null, h("th", { text: "チーム" }), h("th", { text: "予約ch（割当と予備）" }))));
   const tb = h("tbody", null, h("tr", null, h("td", { text: `${st.own.team}（自チーム）` }), h("td", { text: [st.own.label, ...st.own.spare.map((s2) => s2.label)].join("、") })));
   for (const tm of st.teams) tb.append(h("tr", null, h("td", { text: tm.name }), h("td", { text: tm.channels.map(chLabel).join("、") || "—" })));

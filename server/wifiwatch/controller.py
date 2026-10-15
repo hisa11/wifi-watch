@@ -20,7 +20,7 @@ from .analyzer.alerts import AlertEvent
 from .analyzer.occupancy import OccupancyContext, channel_rows, is_present, missed_visits, present_stations, suggestions
 from .classify import FP_RE
 from .clock import Clock, jst_str, utc_iso
-from .config import Config
+from .config import OWN_AP_MAX, Config, normalize_mac, valid_ssid
 from .logs import FileLogs, write_own
 from .monitor import Monitor
 from .scheduler import Busy, ManualScan, NeedsConfirm, SchedulerError
@@ -34,6 +34,14 @@ MAX_TAGS = 10
 MAX_TAG_LEN = 24
 MAX_MEMO = 1000
 BSSID_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
+
+
+def _own_ap_text(a: dict[str, Any]) -> str:
+    if a["match"] == "bssid":
+        return "MACアドレス " + "、".join(a["bssids"]) + (f"（SSID {'、'.join(a['ssids'])} はなりすましの見張りに使う）" if a["ssids"] else "")
+    if a["match"] == "ssid":
+        return "SSID " + "、".join(a["ssids"])
+    return "未設定"
 
 
 class ControlError(Exception):
@@ -283,6 +291,43 @@ class Controller:
                        f"{bssid} → {team or '（外した）'}", origin)
         return {"bssid": bssid, "team": team}
 
+    # ------------------------------------------------------------ 自チームのAP（デスクトップの画面だけ）
+    def set_own_ap(self, bssids: Any, ssids: Any, origin: str = "desktop") -> dict[str, Any]:
+        """自チームのAPを、MACアドレス（BSSID）かSSIDで登録する。
+
+        MACアドレスが1つでもあれば、そのAPだけが自チーム（同じSSIDの別の局は「SSIDのなりすまし」の警報）。
+        SSIDだけなら、その名前の局はすべて自チーム（ルータを替えても追従する）。
+        """
+        if origin != "desktop":
+            raise ControlError(403, "desktop_only", "自チームのAPはデスクトップの画面だけで変えられます")
+        if not isinstance(bssids, list) or not isinstance(ssids, list):
+            raise ControlError(400, "bad_own_ap", "bssids と ssids はリストで送ってください")
+        if len(bssids) > OWN_AP_MAX or len(ssids) > OWN_AP_MAX:
+            raise ControlError(400, "bad_own_ap", f"MACアドレスとSSIDは、それぞれ{OWN_AP_MAX}個までです")
+        try:
+            bs = list(dict.fromkeys(normalize_mac(b) for b in bssids))
+        except ValueError as e:
+            raise ControlError(400, "bad_bssid", str(e)) from None
+        if any(not valid_ssid(x) for x in ssids):
+            raise ControlError(400, "bad_ssid", "SSIDは1〜32バイトです")
+        ss = list(dict.fromkeys(ssids))
+        before = self.own_ap()
+        own = self.cfg.own
+        own.bssids, own.ssids = bs, ss
+        self.mon.overrides.update(own_bssids=bs, own_ssids=ss)
+        self.mon.classifier.set_own_bssids(bs)
+        self.mon.analyzer.set_own_addrs(bs + list(own.station_macs))
+        self.mon.classifier.classify_all(self.mon.analyzer.table)
+        after = self.own_ap()
+        self.log_event("own", "ap", "info", None, "自チームのAP",
+                       f"{_own_ap_text(before)} → {_own_ap_text(after)}", origin)
+        return after
+
+    def own_ap(self) -> dict[str, Any]:
+        own = self.cfg.own
+        match = "bssid" if own.bssids else ("ssid" if own.ssids else "none")
+        return {"bssids": list(own.bssids), "ssids": list(own.ssids), "match": match}
+
     # ------------------------------------------------------------ 機種の覚え帳（デスクトップの画面だけ）
     def remember_model(self, fp: Any, label: Any, bssid: Any = None, origin: str = "desktop") -> dict[str, Any]:
         """指紋（model_fp）に機種の名前を覚える。label が空なら忘れる。同じ指紋の局すべてに出る。"""
@@ -504,6 +549,7 @@ class Controller:
                 "rate": recent[-1]["rate"] if recent else None,
                 "retry": next((x["retry"] for x in reversed(series) if x["retry"] is not None), None),
                 "bssids": list(self.cfg.own.bssids),
+                "ap": self.own_ap(),
             },
             "rx": mon.liveness.status(),
             "alerts": alerts, "alert_counts": counts,

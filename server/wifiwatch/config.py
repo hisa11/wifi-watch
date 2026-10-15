@@ -41,6 +41,20 @@ def _freq(v: object) -> int:
     return ch.parse_channel_ref(v)
 
 
+def normalize_mac(v: object) -> str:
+    """aa-BB-cc… も aa:bb:cc… にそろえる。読めなければ ValueError。"""
+    return _mac(v)
+
+
+# 自チームのAPとして登録できる数（MACアドレス・SSIDそれぞれ）
+OWN_AP_MAX = 16
+
+
+def valid_ssid(v: object) -> bool:
+    """SSIDは1〜32バイト（UTF-8）。"""
+    return isinstance(v, str) and 1 <= len(v.encode("utf-8")) <= 32
+
+
 Mac = Annotated[str, BeforeValidator(_mac)]
 Freq = Annotated[int, BeforeValidator(_freq)]
 Width = Literal[20, 40, 80, 160, 320]
@@ -335,7 +349,7 @@ def atomic_write_json(path: str | os.PathLike[str], data: Any) -> None:
 class Overrides:
     """画面やアプリから変えた設定。再起動しても残す（data_dir/overrides.json）。
 
-    持つもの：巡回から外した帯域とch、モード、自分のch（再起動なしで変更したもの）。
+    持つもの：巡回から外した帯域とch、モード、自分のch（再起動なしで変更したもの）、自チームのAP（MACアドレス・SSID）。
     """
 
     DEFAULTS: dict[str, Any] = {
@@ -344,6 +358,8 @@ class Overrides:
         "mode": "LIVE",
         "own_channel": None,
         "own_width": None,
+        "own_bssids": None,  # None＝config.json のまま
+        "own_ssids": None,
     }
 
     def __init__(self, path: str | os.PathLike[str]):
@@ -370,6 +386,10 @@ class Overrides:
         if d.get("own_channel") is not None and not ch.is_known_freq(d["own_channel"]):
             d["own_channel"] = None
             d["own_width"] = None
+        if d.get("own_bssids") is not None:
+            d["own_bssids"] = [b for b in d["own_bssids"] if isinstance(b, str) and MAC_RE.match(b)][:OWN_AP_MAX]
+        if d.get("own_ssids") is not None:
+            d["own_ssids"] = [x for x in d["own_ssids"] if valid_ssid(x)][:OWN_AP_MAX]
 
     def get(self, key: str) -> Any:
         with self._lock:

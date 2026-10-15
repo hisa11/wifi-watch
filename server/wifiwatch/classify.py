@@ -217,6 +217,10 @@ class Classifier:
         self._team_bssid = {b: t.name for t in cfg.teams for b in t.bssids}
         self._team_ssid = [(p, t.name) for t in cfg.teams for p in t.ssids]
 
+    def set_own_bssids(self, bssids: Iterable[str]) -> None:
+        """自チームのAPのMACアドレス（画面で変えたとき）。SSIDは cfg.own.ssids をそのつど見る。"""
+        self._own_bssids = set(bssids)
+
     def set_tag(self, bssid: str, team: str | None) -> None:
         if team:
             self.tags[bssid] = team
