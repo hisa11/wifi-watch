@@ -15,6 +15,7 @@ NHK高専ロボコン全国大会向けのWi-Fi監視システム。部品は3�
 cd server && .venv/bin/python -m pytest -q          # PC側
 cd relay && npm test                                 # 中継
 cd android && ./gradlew testDebugUnitTest            # アプリ（JVMの単体テスト）
+server/.venv/bin/python tools/dev_stack.py           # ローカルの中継＋偽の無線のPC（エミュレータからの通し。--part relay|pc で別々に）
 ```
 
 開発用PCの無線はRealtek RTL8852BE（AX210ではない）。実機の層（iw・ip・AF_PACKET）はここでは動かさず、偽の無線（`server/wifiwatch/radio/fake.py`）で開発する。実機のコマンドはユーザーが実行する（`docs/HARDWARE_TEST.md`）。

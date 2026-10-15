@@ -31,12 +31,16 @@ object Outbox {
         kick(context)
     }
 
-    fun kick(context: Context) {
+    /**
+     * 送る仕事を入れる。now=true は、待ち（指数的に延びる間隔）を捨ててすぐ送り直す
+     * （中継に届くようになったのが分かったとき）。送っている途中を取り消しても、要求IDで冪等なので二重にはならない。
+     */
+    fun kick(context: Context, now: Boolean = false) {
         val req = OneTimeWorkRequestBuilder<SendWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(WORK, ExistingWorkPolicy.APPEND_OR_REPLACE, req)
+        WorkManager.getInstance(context).enqueueUniqueWork(WORK, if (now) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE, req)
     }
 }
 

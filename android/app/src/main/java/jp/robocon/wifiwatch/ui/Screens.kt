@@ -447,7 +447,10 @@ fun WalkScreen(vm: MainViewModel) {
             SectionTitle("局（強い順）")
             for (s in ui.seen.sortedByDescending { it.rssi }.take(40)) StationLine(s.ssid, s.bssid, s.op.primaryFreq, s.op.widthLabel, s.rssi, null, s.standard.let { "802.11$it" })
         }
-        SectionTitle("自分の歩測（${walks.size}件・未送 $outbox）")
+        // 未送は歩測だけを数える（送る待ちの行列にはラベルの変更も入る）
+        val unsent = walks.count { it.sentAt == null && it.lastError == null }
+        SectionTitle("自分の歩測（${walks.size}件・未送 $unsent）")
+        if (outbox > 0) Text("端末に溜めて送る待ち：${outbox}件（ラベルの変更を含む）。中継に届けば自動で送ります。", color = w.ink2, fontSize = 12.sp)
         Row {
             OutlinedButton(onClick = { vm.resendOutbox() }) { Text("送り直す") }
             Spacer(Modifier.width(8.dp))

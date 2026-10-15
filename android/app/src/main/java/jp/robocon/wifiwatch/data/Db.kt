@@ -100,6 +100,9 @@ interface OutboxDao {
     @Query("SELECT COUNT(*) FROM outbox")
     fun count(): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM outbox")
+    suspend fun size(): Int
+
     @Query("DELETE FROM outbox WHERE requestId = :id")
     suspend fun delete(id: String)
 

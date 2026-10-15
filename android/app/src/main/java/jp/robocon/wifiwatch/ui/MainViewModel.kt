@@ -75,6 +75,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (settings.configured) {
                     try {
                         val r = PollResult.parse(app.api.poll(opened))
+                        // 開いた直後か、届かなかったあとで届いたら、溜まっているラベルと歩測をすぐ送り直す
+                        if ((opened || _live.value.error != null) && app.db.outbox().size() > 0) Outbox.kick(getApplication(), now = true)
                         opened = false
                         val now = SystemClock.elapsedRealtime()
                         _live.update {
