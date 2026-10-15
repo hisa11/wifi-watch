@@ -113,6 +113,7 @@ def test_state_has_everything_the_dashboard_needs(env):
     assert "own" in states and "patrol" in states
     assert any(st["ssid"] == "OUR-ROBOT-6G" and st["kind"] == "own" for st in s["stations"])
     assert all(len(x["spans"]) >= 1 for x in s["stations"])
+    assert all("missed" in x and isinstance(x["present"], bool) for x in s["stations"])  # 「いる」の理由を画面に出す
 
 
 def test_manual_scan_flow_creates_record(env):

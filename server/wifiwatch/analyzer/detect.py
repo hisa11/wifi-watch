@@ -16,6 +16,7 @@ from ..config import Config
 from ..scheduler import Scheduler
 from .alerts import AlertEvent, AlertManager, Finding
 from .core import Analyzer
+from .occupancy import is_present
 from .stations import Station
 
 log = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ class Detector:
         self._candidates[st.bssid] = event
 
     def present(self, st: Station, now: float) -> bool:
-        return now - st.last_seen_mono <= self.sched.presence_window(st.primary_freq)
+        return is_present(st, self.an, self.sched, now)
 
     # ------------------------------------------------------------ 判定
     def evaluate(self) -> list[AlertEvent]:

@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from . import channels as ch
 from .analyzer.alerts import AlertEvent
-from .analyzer.occupancy import OccupancyContext, channel_rows, present_stations, suggestions
+from .analyzer.occupancy import OccupancyContext, channel_rows, is_present, missed_visits, present_stations, suggestions
 from .classify import FP_RE
 from .clock import Clock, jst_str, utc_iso
 from .config import Config
@@ -438,7 +438,8 @@ class Controller:
                 "spans": [[x.lo, x.hi] for x in st.spans], "rssi": None if st.rssi_avg is None else round(st.rssi_avg),
                 "kind": st.kind or "unknown", "team": st.team, "model": st.model_guess, "signature": st.signature,
                 "model_fp": st.model_fp,
-                "standard": st.standard, "security": st.security, "age_s": round(age, 1), "present": age <= win,
+                "standard": st.standard, "security": st.security, "age_s": round(age, 1),
+                "present": is_present(st, self.mon.analyzer, s, now), "missed": missed_visits(st, self.mon.analyzer),
                 "window_s": round(win), "alerts": alerting.get(st.bssid, []),
                 "new": st.bssid in self.mon.detector.newcomers, "dup_beacon": st.dup_beacon,
                 "first_seen": st.first_seen, "last_seen": st.last_seen,
@@ -453,6 +454,8 @@ class Controller:
         d["alerts"] = [a.to_dict() for a in self.mon.alerts.active() if bssid in a.parties]
         d["age_s"] = round(self.clock.monotonic() - st.last_seen_mono, 1)
         d["window_s"] = round(self.mon.scheduler.presence_window(st.primary_freq))
+        d["missed"] = missed_visits(st, self.mon.analyzer)
+        d["present"] = is_present(st, self.mon.analyzer, self.mon.scheduler, self.clock.monotonic())
         d["clients"] = [c.to_dict() for c in list(self.mon.analyzer.table.clients.values()) if c.bssid == bssid][:50]
         book = self.mon.classifier.book.get(st.model_fp)
         d["model_book"] = book.get("label") if book else None

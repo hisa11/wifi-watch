@@ -137,3 +137,28 @@ def test_scan_only_unreceivable_channels_are_not_observed(tmp_path):
     a.process_batch(b6)
     assert F("6g37") not in a.stats.last_observed and F("5g36") in a.stats.last_observed
     assert r.receivable == {2412, 5180}  # disabled のchは受けられないものとして扱う
+
+
+def test_scan_only_does_not_redeliver_kernel_leftovers(tmp_path):
+    # いなくなった局をカーネルが結果に残していても、新しく聞こえていなければ渡さない（最終確認を進めない）
+    clk = FakeClock()
+    seen = {"ms": 100}
+    dump = lambda ifn: [ScanBss("02:00:00:00:00:02", 5180, -60.0, build.ap_ies(F("5g36"), 20, "S5"), seen["ms"])]
+    r = ScanOnlyRadio("wlan0", clk, runner=RunPhy(), dump=dump, sys_class_net=phy_sysnet(tmp_path))
+    r.tune(validate_tuning(F("5g36"), 20, F("5g36")))
+    assert len(r.capture(0.25).frames) == 1
+    clk.advance(25)  # 次のスキャン。この局はもう聞こえていない（カーネルの記録は25秒前のまま）
+    seen["ms"] = 25_100
+    b = r.capture(0.25)
+    assert b.frames == [] and b.receive_s > 0  # 見に行った（新しいスキャン）が、聞こえなかった
+    assert r.capture(0.25).receive_s == 0  # 同じスキャンの結果を見直しても、もう一度見たことにはしない
+    clk.advance(25)
+    seen["ms"] = 300  # また聞こえた
+    assert len(r.capture(0.25).frames) == 1
+
+
+def test_scan_only_failed_scan_is_not_an_observation(tmp_path):
+    clk = FakeClock()
+    r = ScanOnlyRadio("wlan0", clk, runner=RunPhy(scan_rc=240), dump=lambda ifn: [], sys_class_net=phy_sysnet(tmp_path))
+    r.tune(validate_tuning(F("5g36"), 20, F("5g36")))
+    assert r.capture(0.25).receive_s == 0  # busy で失敗したスキャンでは、そのchを見たことにしない

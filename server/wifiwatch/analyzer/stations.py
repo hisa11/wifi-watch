@@ -51,6 +51,7 @@ class Station:
     data_frames: int = 0
     seen_on: dict[int, int] = field(default_factory=dict)
     last_parse_mono: float = -1e18
+    visits_at_seen: int = 0  # 最後に聞こえたときの、主chを見に行った回数（ChannelStats.visits）
     # chの移動
     prev_primary_freq: int | None = None
     moved_at: float | None = None

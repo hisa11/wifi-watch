@@ -125,6 +125,7 @@ class Analyzer:
                         info = ies.parse_bss(raw, body, end)
                     st = table.update_beacon(bssid, tun.freq, rx.signal, info, now, mono)
                     if st is not None:
+                        st.visits_at_seen = stats.visits.get(st.primary_freq, 0)
                         prev = seen.get(bssid)
                         if bssid not in seen or (rx.signal is not None and (prev is None or rx.signal > prev)):
                             seen[bssid] = rx.signal

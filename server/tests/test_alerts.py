@@ -443,7 +443,10 @@ def test_suppression_addition_and_resolution():
     h.tick()
     adds = h.notified("added", "offchannel")
     assert len(adds) == 1 and adds[0].new_parties == ["02:a0:00:00:00:03"]
-    # 条件が消える（局がいなくなる）→10秒で解消。ただし発生の通知から30秒は解消を知らせない
+    # 条件が消える（局がいなくなる：chを見に行って2回続けて聞こえない）→10秒で解消。ただし発生の通知から30秒は解消を知らせない
+    for _ in range(2):
+        for ref in ("6g45", "6g49", "6g37"):
+            h.batch(F(ref))
     h.tick(200)
     assert "offchannel" not in h.active()
     resolved = h.notified("resolved", "offchannel")

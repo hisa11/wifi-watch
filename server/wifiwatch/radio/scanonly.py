@@ -38,7 +38,9 @@ class ScanOnlyRadio(LinuxRadio):
         self.cache: list[ScanBss] = []
         self.cache_at = -1e18
         self.generation = 0
-        self.delivered: set[tuple[int, str]] = set()
+        self.dump_at = -1e18  # スキャン結果を読んだ時刻（monotonic）
+        self.last_obs: dict[str, float] = {}  # BSSID → 渡した観測の時刻（カーネルが最後に聞いた時刻）
+        self.looked: dict[int, int] = {}  # ch → そのchを「見た」と数えたスキャンの番号
         self.last_scan_ok = False
         self.receivable: set[int] | None = None  # None＝分からない（すべて受けられるとみなす）
         self.receivable_at = -1e18
@@ -82,10 +84,10 @@ class ScanOnlyRadio(LinuxRadio):
             self.cache = self.dump(self.ifname)
         except OSError as e:
             raise RadioError(f"スキャン結果を読めません：{e}") from None
+        self.dump_at = self.clock.monotonic()
         # 失敗したときは早めにやり直す（20秒待たずに5秒で）
         self.cache_at = self.clock.monotonic() - (0 if self.last_scan_ok else max(0.0, self.max_age_s - 5.0))
         self.generation += 1
-        self.delivered = set()
 
     def tune(self, tuning: Tuning) -> None:
         self.tuning = tuning
@@ -105,14 +107,25 @@ class ScanOnlyRadio(LinuxRadio):
         self.clock.sleep(min(duration, 0.05))
         frames = []
         for b in self.cache:
-            if b.freq != want or (self.generation, b.bssid) in self.delivered:
+            if b.freq != want:
                 continue
             if b.seen_ms_ago is not None and b.seen_ms_ago > self.max_age_s * 1000 * 3:
                 continue  # 古いスキャンの残り
-            self.delivered.add((self.generation, b.bssid))
+            # カーネルは、いなくなった局もしばらく結果に残す。前に渡したときより新しく聞こえたものだけ渡す
+            # （古い結果をスキャンのたびに渡すと、いなくなった局の「最終確認」が進み続ける）
+            obs = self.dump_at - (b.seen_ms_ago or 0) / 1000.0
+            if obs <= self.last_obs.get(b.bssid, -1e18) + 0.5:
+                continue
+            self.last_obs[b.bssid] = obs
             sig = None if b.signal_dbm is None else int(round(b.signal_dbm))
             frames.append(build.radiotap(want, signal=sig) + build.beacon(b.bssid, b.ies))
-        return FrameBatch(self.tuning, t0, self.clock.monotonic(), frames)
+        t1 = self.clock.monotonic()
+        # 「このchを見た」と数えるのは、成功したスキャンのあとの最初の枠だけ。同じスキャンの結果を見直しても、
+        # 失敗したスキャン（busy）でも、新しく見たことにはならない（受信していた秒0）
+        if self.last_scan_ok and self.looked.get(want) != self.generation:
+            self.looked[want] = self.generation
+            return FrameBatch(self.tuning, t0, t1, frames)
+        return FrameBatch(self.tuning, t1, t1, frames)
 
     def survey(self) -> list[SurveyEntry] | None:
         return None

@@ -213,6 +213,15 @@ function xScale(band, x0, x1) {
   };
 }
 
+/** 「いる」「いない」の理由（時間ではなく、主chを見に行って聞こえたか）。 */
+function presenceText(x) {
+  const missed = x.missed || 0;
+  if (!x.present) return missed >= 2 ? "いない扱い（このchを見に行って2回続けて聞こえない）" : "いない扱い（このchを長く見に行けていない・聞こえない）";
+  if (x.age_s <= 5) return "いる";
+  if (missed === 0) return "いる扱い（このchをまだ見に行っていない。次に見て聞こえなければ減る）";
+  return `いる扱い（見に行って${missed}回聞こえなかった。2回で「いない」）`;
+}
+
 function stationNode(st) {
   const k = kindOf(st.kind);
   const wrap = h("div");
@@ -223,7 +232,8 @@ function stationNode(st) {
     h("div", { class: "r", text: `主${chLabel(st.freq)}・${st.width_label}MHz（${spanLabel(st.spans)}）` }),
   );
   if (st.model) wrap.append(h("div", { class: "r", text: `機種推定：${st.model}` }));
-  wrap.append(h("div", { class: "r", text: `最終確認 ${ago(st.age_s)}${st.present ? "" : "（いない扱い）"}・${st.bssid}` }));
+  wrap.append(h("div", { class: "r", text: `最終確認 ${ago(st.age_s)}・${presenceText(st)}` }));
+  wrap.append(h("div", { class: "r", text: st.bssid }));
   if (st.alerts && st.alerts.length) wrap.append(h("div", { class: "r", text: `警報：${st.alerts.map((a) => ALERT_TYPE_JP[a] || a).join("、")}` }));
   if (st.new) wrap.append(h("div", { class: "r", text: "新規参入（自分の帯域に新しく現れた）" }));
   wrap.append(h("div", { class: "r", text: "クリックで詳細" }));
@@ -545,7 +555,8 @@ function renderCharts(st) {
   for (const [band, el, hgt, ml] of [["6", "chart6", 300, 14], ["5", "chart5", 150, 5], ["2.4", "chart24", 150, 4]]) {
     renderSpectrum($(el), band, {
       ...common, height: hgt, maxLabels: ml,
-      stations: st.stations.filter((q) => q.band === band),
+      // いない扱いの局はグラフに描かない（選んでいる局だけは薄く残す）。表では「いる局だけ」を外すと見える
+      stations: st.stations.filter((q) => q.band === band && (q.present || isSel(q.bssid))),
       channels: st.channels.filter((r) => r.band === band),
       ownSpans: band === ownBand ? ownSpans : [], blockSpan: band === ownBand ? blockSpan : null,
     });
@@ -744,7 +755,7 @@ function detailNodes(d) {
   add("機種推定", d.model_guess);
   if (d.model_fp) add("指紋", `${d.model_fp}（同じ指紋の局 ${d.same_fp ?? "—"}）`);
   add("規格・暗号", `802.11${d.standard}・${d.security}${d.pmf_required ? "（PMF必須）" : ""}`);
-  add("最終確認", `${ago(d.age_s)}（${tJST(d.last_seen)}）・この局を「いる」とみなす時間 ${d.window_s}秒`);
+  add("最終確認", `${ago(d.age_s)}（${tJST(d.last_seen)}）・${presenceText(d)}`);
   add("初めて見た", dJST(d.first_seen));
   add("受けたch", (d.seen_on || []).map((f) => `ch${chNum(f)}`).join("、"));
   add("ビーコン・データ", `${d.beacons}・${d.data_frames}`);

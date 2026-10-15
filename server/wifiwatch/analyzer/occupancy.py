@@ -16,8 +16,32 @@ from .core import Analyzer
 from .stations import Station
 
 
+# 主chを見に行ってこの回数続けて聞こえなければ「いない」。1回だけ聞こえなかったときは、再訪の間隔から決めた時間で待つ。
+# まだ一度も見に行けていない（モードの切替の直後、巡回外など）ときは、いなくなった証拠が無いので最長10分は「いる」とみなす
+MISSES_GONE = 2
+GRACE_S = 5.0
+UNLOOKED_MAX_S = 600.0
+
+
+def missed_visits(st: Station, an: Analyzer) -> int:
+    """最後に聞こえてから、主chを見に行ったのに聞こえなかった回数。"""
+    return max(0, an.stats.visits.get(st.primary_freq, 0) - st.visits_at_seen)
+
+
+def is_present(st: Station, an: Analyzer, sched: Scheduler, now: float) -> bool:
+    age = now - st.last_seen_mono
+    if age <= GRACE_S:
+        return True
+    missed = missed_visits(st, an)
+    if missed >= MISSES_GONE:
+        return False  # 見に行ったのに続けて聞こえない
+    if missed == 0:
+        return age <= UNLOOKED_MAX_S
+    return age <= sched.presence_window(st.primary_freq)
+
+
 def present_stations(an: Analyzer, sched: Scheduler, now: float) -> list[Station]:
-    return [s for s in an.table.all() if now - s.last_seen_mono <= sched.presence_window(s.primary_freq)]
+    return [s for s in an.table.all() if is_present(s, an, sched, now)]
 
 
 def _mw(dbm: float) -> float:

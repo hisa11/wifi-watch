@@ -44,6 +44,10 @@ class ChannelStats:
         self.keep_s = keep_s
         self.buckets: dict[Key, deque[Bucket]] = {}
         self.last_observed: dict[int, float] = {}  # 主chのMHz → 最後に受信を終えた時刻（monotonic）
+        # 主chのMHz → そのchを見に行った回数（受信していた秒が0より大きい枠の続きを1回と数える）。
+        # 局が「いなくなった」かを、時間ではなく「見に行ったのに聞こえなかった回数」で決めるため
+        self.visits: dict[int, int] = {}
+        self._visiting: int | None = None
         self.observed_total: dict[int, float] = {}  # 主chのMHz → 受信した秒数の合計
         self.beacons_by_primary: dict[int, int] = {}  # 局の主chで数えたビーコン（重複ビーコンを含む）
         self.lock = threading.Lock()
@@ -66,6 +70,11 @@ class ChannelStats:
             b.receive_s += receive_s
             if receive_s > 0:  # 受信していた時間が0の枠（その無線では受けられないchなど）は「見た」にしない
                 self.last_observed[key[0]] = t_end
+                if self._visiting != key[0]:
+                    self.visits[key[0]] = self.visits.get(key[0], 0) + 1
+                    self._visiting = key[0]
+            elif self._visiting != key[0]:
+                self._visiting = None
             self.observed_total[key[0]] = self.observed_total.get(key[0], 0.0) + receive_s
             return b
 

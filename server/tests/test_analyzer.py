@@ -167,3 +167,37 @@ def test_fake_radio_end_to_end_own_block():
     tot = a.stats.totals((F("6g37"), 160), clk.monotonic(), 20)
     assert tot.own_frames > 0 and tot.frames > 0  # 広帯域の局のデータは拾う
     assert tot.ppdu_bw == {}
+
+
+def test_station_is_gone_after_missed_visits_not_just_time():
+    # 「いない」は、時間ではなく「主chを見に行ったのに聞こえなかった回数」で決める（見に行けていない間は時間で待つ）
+    from wifiwatch.analyzer.occupancy import is_present, missed_visits
+
+    class Sched:
+        def presence_window(self, f):
+            return 600.0
+
+    clk = FakeClock()
+    a = Analyzer(clk)
+    f, g = F("5g36"), F("5g40")
+    beacon = build.radiotap(f, signal=-60) + build.beacon("02:00:00:00:00:05", build.ap_ies(f, 20, "S"))
+    t = clk.monotonic()
+
+    def visit(freq, frames=()):
+        nonlocal t
+        a.process_batch(FrameBatch(validate_tuning(freq, 20, freq), t, t + 0.25, list(frames)))
+        t += 0.3
+        clk.advance(10)
+
+    visit(f, [beacon])
+    st = a.table.get("02:00:00:00:00:05")
+    visit(g)  # ほかのchを見ている間は数えない
+    assert missed_visits(st, a) == 0 and is_present(st, a, Sched(), clk.monotonic())
+    visit(f)
+    visit(g)
+    assert missed_visits(st, a) == 1 and is_present(st, a, Sched(), clk.monotonic())
+    visit(f)
+    assert missed_visits(st, a) == 2 and not is_present(st, a, Sched(), clk.monotonic())  # 40秒でも「いない」
+    visit(g)
+    visit(f, [beacon])
+    assert missed_visits(st, a) == 0 and is_present(st, a, Sched(), clk.monotonic())
