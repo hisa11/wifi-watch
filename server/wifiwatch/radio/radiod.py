@@ -223,6 +223,13 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("スキャンだけのモードで動きます（活動量・リトライ率・deauth・160MHz受信は使えません）")
     else:
         radio = LinuxRadio(args.interface, monitor_flags=args.monitor_flag)
+    try:
+        radio.load_hw_freqs()
+        if radio.unreceivable:
+            log.warning("この無線にないch：%d（%s）。合わせず、画面では「見ていない（この無線では受けられない）」と出します",
+                        len(radio.unreceivable), "6GHzすべて" if all(f > 5925 for f in radio.unreceivable) else "一部")
+    except Exception as e:  # 起動は止めない
+        log.warning("この無線のchの一覧を読めません：%s", e)
     if not args.no_setup and not args.scan_only:
         # 合否ゲートと同じ順：先に管理モードでスキャンして国情報で6GHzを有効にさせ、それからモニタ
         try:

@@ -17,9 +17,9 @@ step "カーネルとドライバ"
 run uname -r
 echo "ドライバ: $(basename "$(readlink -f /sys/class/net/$IF/device/driver)")"
 
-step "管理モードでスキャン（周りのビーコンの国情報で6GHzを有効にさせる）"
+step "管理モードでパッシブスキャン（周りのビーコンの国情報で6GHzを有効にさせる）"
 run ip link set "$IF" up
-n=$(iw dev "$IF" scan 2>/dev/null | grep -c '^BSS ' || true)
+n=$(iw dev "$IF" scan passive 2>/dev/null | grep -c '^BSS ' || true)  # パッシブ（送信しない）
 echo "見えたBSS: $n"
 
 step "国設定（phy側が country JP か）"

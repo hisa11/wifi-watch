@@ -57,7 +57,7 @@ class FakeRunner:
             return RunResult(0, PHY_OK, "")
         if argv[-2:] == ["survey", "dump"]:
             return RunResult(0, SURVEY, "")
-        if argv[-1] == "scan":
+        if "scan" in argv[-2:]:
             return RunResult(0, "BSS 02:00:00:00:00:01(on wlan0)\n\tfreq: 5955\nBSS 02:00:00:00:00:02(on wlan0)\n", "")
         return RunResult(0, "", "")
 
@@ -129,6 +129,51 @@ def test_monitor_and_recovery_commands(sysnet):
     run.calls.clear()
     r.reload_driver()
     assert run.calls == [["modprobe", "-r", "iwlmvm", "iwlwifi"], ["modprobe", "iwlwifi"]]
+
+
+PHY_NO6 = """Wiphy phy0
+\tBand 1:
+\t\tFrequencies:
+\t\t\t* 2412.0 MHz [1] (20.0 dBm)
+\tBand 2:
+\t\tFrequencies:
+\t\t\t* 5180.0 MHz [36] (23.0 dBm)
+\t\t\t* 5845.0 MHz [169] (disabled)
+"""
+
+
+class PhyNo6Runner(FakeRunner):
+    def __call__(self, argv, timeout):
+        if list(argv[:2]) == ["iw", "phy"]:
+            self.calls.append(list(argv))
+            return RunResult(0, PHY_NO6, "")
+        return super().__call__(argv, timeout)
+
+
+def test_channels_missing_from_hardware_are_skipped(sysnet):
+    # 6GHz非対応の無線（開発PCのRTL8852BEなど）：6GHzには合わせず、失敗にもせず、受信していた秒0で返す
+    run = PhyNo6Runner()
+    r, feed = make_linux(run, sysnet)
+    freqs = r.load_hw_freqs()
+    assert freqs == {2412: True, 5180: True, 5845: False}
+    assert r.unreceivable == [f for f in ch.ALL_FREQS if f not in (2412, 5180, 5845)]
+    run.calls.clear()
+    r.tune(validate_tuning(F("6g37"), 160, 6185))
+    assert run.calls == []  # iw を呼ばない（合わせられないchに合わせようとしない）
+    feed.send(build.radiotap(F("5g36"), signal=-50) + build.beacon("02:00:00:00:00:01", build.ap_ies(F("5g36"), 20, "A")))
+    b = r.capture(0.05)
+    assert b.receive_s == 0 and b.frames == []  # 見ていない（検知なしではない）
+    r.tune(validate_tuning(F("5g36"), 20, F("5g36")))
+    assert run.calls and run.calls[-1][:4] == ["iw", "dev", "wlan0", "set"]
+    assert r.capture(0.05).receive_s > 0
+
+
+def test_managed_scan_is_passive_only(sysnet):
+    run = FakeRunner(fail=["scan"])
+    r, _ = make_linux(run, sysnet)
+    r.managed_scan()
+    scans = [c for c in run.calls if "scan" in c]
+    assert scans and all(c[-2:] == ["scan", "passive"] for c in scans)  # 受信専用：能動スキャンはしない
 
 
 def test_reload_driver_only_for_iwlwifi(sysnet, tmp_path):

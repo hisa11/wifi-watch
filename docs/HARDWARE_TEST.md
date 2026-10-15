@@ -19,14 +19,29 @@ cd ~/wifi-watch && deploy/setup.sh wlan0      # IF名は ip -br link で確か�
 
 ## 0'. 開発PC（6GHz非対応の無線）で、本物の2.4/5GHzを見る
 
-本番と同じコードの「スキャンだけのモード」（radiod `--scan-only`）を、開発PCの無線（例：RTL8852BE、IF名 wlo1）で動かす。
-Wi-Fiは切れない（モニタモードにしない・IFを落とさない・ドライバを読み込み直さない）。スキャンはパッシブだけ（送信しない）。
-6GHzは「見ていない（この無線では受けられない）」と出る。活動量・リトライ率・deauth・160MHz受信も、このモードでは見ていない。
-パッシブスキャン（約20秒ごと）の数秒間は、このPCのWi-Fiの通信が少し遅くなることがある。
+どちらも本番と同じコード（radiod ＋ 本体）。6GHzは「見ていない（この無線では受けられない）」と出る。受信専用（送信・注入はしない）。
+最初に一度だけ：
 
 ```bash
 sudo apt install iw
 ```
+
+### 0'-a. モニタモード（本番と同じ。動いている間、このPCのWi-Fiの通信は切れる）
+
+無線をアナライザー専用にする（ユーザーの希望：アナライザーが最優先、通信は切れてよい）。全部のフレームを受けるので、活動量・リトライ率・deauth も見える（2.4/5GHz）。
+
+```bash
+cd ~/wifi-watch && tools/devpc_monitor.sh wlo1
+```
+
+- 確認のあと、wlo1 を NetworkManager から外し、radiod（root）が管理モードでパッシブスキャン → モニタモードにし、本体を起動する。画面は http://127.0.0.1:8080 。
+- Ctrl-C で止めると、管理モードに戻して NetworkManager に返す（つなぎ直す）。動いている間は、Claude などネットを使うアプリも止まる。
+- 巡回を速くするなら、画面でモードを PRE（下見）にする（LIVEは時間の大半を自ブロックの6GHzに使うが、この無線では合わせないので空振りになる）。
+- 万一Wi-Fiが戻らないとき：`sudo ip link set wlo1 down && sudo iw dev wlo1 set type managed && sudo ip link set wlo1 up && sudo nmcli device set wlo1 managed yes`
+
+### 0'-b. スキャンだけのモード（通信を切りたくないとき）
+
+約20秒ごとのパッシブスキャンの結果を使う（ビーコンから分かる機能だけ）。Wi-Fiは切れないが、スキャンの数秒間は通信が少し遅くなることがある。
 
 端末1（root の補助。Ctrl-Cで止める）：
 
@@ -34,15 +49,14 @@ sudo apt install iw
 cd ~/wifi-watch/server && sudo .venv/bin/python -m wifiwatch.radio.radiod --interface wlo1 --scan-only --group $(id -gn) --allow-uid $(id -u)
 ```
 
-端末2（本体。普通のユーザー）：
+端末2（本体）：
 
 ```bash
 cd ~/wifi-watch/server && .venv/bin/python -m wifiwatch --config ../data/devpc/config.json
 ```
 
-`data/devpc/config.json`（gitの外）は `config.example.json` の interface を wlo1、radio を `{"kind": "radiod"}` にしたもの。画面は http://127.0.0.1:8080 。
-巡回を速くしたいときは、画面でモードを PRE（下見）にする（LIVEは時間の大半を自ブロックの6GHzに使うため）。
-`deploy/gate.sh` と `deploy/setup.sh` は開発PCでは使わない（モニタモードに切り替えてWi-Fiが切れる）。
+`data/devpc/config.json`（gitの外）は `config.example.json` の interface を wlo1、radio を `{"kind": "radiod"}` にしたもの（無ければ 0'-a のスクリプトが作る）。
+`deploy/gate.sh` と `deploy/setup.sh` は開発PCでは使わない（6GHzの合否を見るためのもので、この無線では必ず不合格になる）。
 
 ## 1. 合否ゲート：AX210を6GHzでモニタモードにできるか
 

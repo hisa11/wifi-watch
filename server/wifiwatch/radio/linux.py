@@ -133,6 +133,10 @@ class LinuxRadio(Radio):
         self.sys_class_net = Path(sys_class_net)
         self.sock: socket.socket | None = None
         self.tuning: Tuning | None = None
+        # この無線（ハードウェア）にあるch。`iw phy <phy> info` に載っていないchは、受けられないので合わせない
+        # （6GHz非対応の無線の6GHzなど）。disabled（国設定で使えない）は載っているので、従来どおり合わせて失敗させ、復旧に回す
+        self.hw_freqs: set[int] | None = None
+        self.unreceivable_tuned = False
         self.tune_style: dict[int, int] = {}  # 幅 → 通った候補の番号
         self.buf = bytearray(8192)
 
@@ -184,8 +188,32 @@ class LinuxRadio(Radio):
         except OSError:
             return None
 
+    def load_hw_freqs(self) -> dict[int, bool]:
+        """`iw phy <phy> info` の周波数の一覧（MHz → 使えるか）を読み、この無線にあるchを覚える。"""
+        phy = self.phy()
+        if not phy or not re.match(r"^phy\d+$", phy):
+            return {}
+        info = self._cmd(["iw", "phy", phy, "info"], 5.0, check=False)
+        freqs = parse_phy_freqs(info.out) if info.rc == 0 else {}
+        if freqs:
+            self.hw_freqs = set(freqs)
+        return freqs
+
+    @property
+    def unreceivable(self) -> list[int]:
+        """この無線にないch（画面で「見ていない」の理由として出す）。分からなければ空。"""
+        if self.hw_freqs is None:
+            return []
+        return [f for f in ch.ALL_FREQS if f not in self.hw_freqs]
+
     # ------------------------------------------------------------ 受信
     def tune(self, tuning: Tuning) -> None:
+        if self.hw_freqs is not None and tuning.freq not in self.hw_freqs:
+            # この無線にないch：合わせない（失敗にもしない）。受信していた秒は0で返す
+            self.tuning = tuning
+            self.unreceivable_tuned = True
+            return
+        self.unreceivable_tuned = False
         cands = tune_argvs(self.ifname, tuning)
         order = list(range(len(cands)))
         first = self.tune_style.get(tuning.width)
@@ -206,6 +234,10 @@ class LinuxRadio(Radio):
     def capture(self, duration: float) -> FrameBatch:
         if self.tuning is None:
             raise RadioError("tuneしていません")
+        if self.unreceivable_tuned:
+            self.clock.sleep(duration)
+            t = self.clock.monotonic()
+            return FrameBatch(self.tuning, t, t, [])
         if self.sock is None:
             self._reopen()
         assert self.sock is not None
@@ -293,20 +325,18 @@ class LinuxRadio(Radio):
         self._link(False)
         self._cmd(["iw", "dev", self.ifname, "set", "type", "managed"])
         self._link(True)
-        r = self._cmd(["iw", "dev", self.ifname, "scan"], 30.0, check=False)
+        # パッシブだけ（受信専用：プローブ要求を送らない。国情報はビーコンから受ける）
+        r = self._cmd(["iw", "dev", self.ifname, "scan", "passive"], 30.0, check=False)
         if r.rc != 0:
             time.sleep(2)  # 立ち上がり直後は busy のことがある
-            r = self._cmd(["iw", "dev", self.ifname, "scan"], 30.0, check=False)
+            r = self._cmd(["iw", "dev", self.ifname, "scan", "passive"], 30.0, check=False)
         return sum(1 for line in r.out.splitlines() if line.startswith("BSS "))
 
     def regulatory(self) -> RegInfo:
         phy = self.phy()
         reg = self._cmd(["iw", "reg", "get"], 5.0, check=False)
         country = parse_reg(reg.out, f"phy#{phy[3:]}" if phy and phy.startswith("phy") else None)
-        freqs: dict[int, bool] = {}
-        if phy and re.match(r"^phy\d+$", phy):
-            info = self._cmd(["iw", "phy", phy, "info"], 5.0, check=False)
-            freqs = parse_phy_freqs(info.out)
+        freqs = self.load_hw_freqs()
         six = [f for f in ch.FREQS_BY_BAND[ch.BAND_6] if freqs.get(f)]
         return RegInfo(country, len(six) == len(ch.FREQS_BY_BAND[ch.BAND_6]), six, reg.out[:2000])
 
