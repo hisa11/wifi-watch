@@ -404,6 +404,16 @@ td .rssi i { display: inline-block; height: 6px; border-radius: 0 3px 3px 0; bac
 .drawer .ssid { font-size: 18px; font-weight: 700; word-break: break-all; }
 .drawer section { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
 .hints { margin: 4px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 12px; }
+/* 重なる局を並べるとき：上に一覧、下に1局ずつ */
+.multi-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 4px; }
+.multi-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 4px 6px; border-bottom: 1px solid var(--border-strong); }
+.multi-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); }
+.multi-table th.num, .multi-table td.num { text-align: right; }
+.multi-table tr { cursor: pointer; }
+.multi-table tbody tr:hover td { background: var(--surface-2); }
+.multi-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 12px; background: var(--surface); scroll-margin-top: 8px; }
+.multi-card section:first-of-type { margin-top: 6px; }
+.multi-card .btn { margin-top: 10px; }
 
 /* ------------------------------------------------------------ ツールチップ・通知・確認 */
 .tooltip {

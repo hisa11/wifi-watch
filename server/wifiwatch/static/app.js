@@ -155,6 +155,7 @@ const tip = {
 const ui = {
   state: null,
   selected: prefs.get("selected", null),
+  selectedMany: null, // 重なっているところをクリックしたときの局（2つ以上）
   tab: prefs.get("tab", "stations"),
   stFilter: prefs.get("stFilter", { band: "all", kind: "all", present: true, q: "" }),
   stSort: prefs.get("stSort", { key: "rssi", asc: false }),
@@ -164,7 +165,10 @@ const ui = {
   clients: { list: [], lastFetch: 0 },
   bands: null,
   drawerDetail: null,
+  drawerDetails: null,
 };
+const isSel = (b) => (ui.selectedMany ? ui.selectedMany.includes(b) : b === ui.selected);
+const selSet = () => new Set(ui.selectedMany || (ui.selected ? [ui.selected] : []));
 
 // ------------------------------------------------------------------ 共通のSVGの模様（斜線＝見ていない）
 function installDefs() {
@@ -226,6 +230,19 @@ function stationNode(st) {
   return [wrap];
 }
 
+function overlapNode(hits) {
+  const out = h("div");
+  out.append(h("div", { class: "v", text: `ここに重なる局 ${hits.length}` }));
+  for (const st of hits.slice(0, 6)) {
+    const k = kindOf(st.kind);
+    out.append(h("div", { class: "row" }, h("span", { class: `glyph ${k.cls}`, text: k.glyph }),
+      h("b", { text: ssidText(st) }), h("span", { class: "r", text: `${st.rssi}dBm・${chLabel(st.freq)}・${st.width_label}MHz` })));
+  }
+  if (hits.length > 6) out.append(h("div", { class: "r", text: `ほか ${hits.length - 6}局` }));
+  out.append(h("div", { class: "r", text: "クリックで全部の詳細" }));
+  return [out];
+}
+
 function channelNode(row, nStations) {
   const out = h("div");
   out.append(h("div", { class: "v", text: chLabel(row.freq) + (row.psc ? "（PSC）" : "") }));
@@ -239,7 +256,7 @@ function channelNode(row, nStations) {
 }
 
 function renderSpectrum(container, band, opt) {
-  const { stations, channels, selected, height = 300, maxLabels = 14, rows = true, ownSpans = [], blockSpan = null, strong = -70, interactive = true } = opt;
+  const { stations, channels, selected = null, height = 300, maxLabels = 14, rows = true, ownSpans = [], blockSpan = null, strong = -70, interactive = true } = opt;
   const W = Math.max(320, container.clientWidth || 800);
   const L = 40, R = 10, T = 26, H = height;
   const xb = T + H;
@@ -291,9 +308,11 @@ function renderSpectrum(container, band, opt) {
   svg.append(s("line", { class: "thresh", x1: L, x2: W - R, y1: y(strong), y2: y(strong) }));
   svg.append(s("text", { class: "thresh-label", x: W - R - 2, y: y(strong) - 3, "text-anchor": "end", text: `強い ${strong}dBm` }));
 
-  // 局（弱い順に描いて強い局を上に。選んだ局は最後）
-  const anySel = selected && stations.some((q) => q.bssid === selected);
-  const ordered = [...stations].sort((p, q) => (p.bssid === selected) - (q.bssid === selected) || (p.rssi ?? -200) - (q.rssi ?? -200));
+  // 局（弱い順に描いて強い局を上に。選んだ局は最後）。選んだ局は1つとは限らない（重なりをクリックしたとき）
+  const chosen = selected instanceof Set ? selected : new Set(selected ? [selected] : []);
+  const isChosen = (b) => chosen.has(b);
+  const anySel = stations.some((q) => isChosen(q.bssid));
+  const ordered = [...stations].sort((p, q) => isChosen(p.bssid) - isChosen(q.bssid) || (p.rssi ?? -200) - (q.rssi ?? -200));
   const geo = [];
   for (const st of ordered) {
     if (st.rssi == null) continue;
@@ -302,8 +321,8 @@ function renderSpectrum(container, band, opt) {
     const cls = ["st-shape", k.cls];
     if (st.alerts.length) cls.push("alerting");
     if (!st.present) cls.push("gone");
-    if (anySel && st.bssid !== selected) cls.push("dim");
-    if (st.bssid === selected) cls.push("selected");
+    if (anySel && !isChosen(st.bssid)) cls.push("dim");
+    if (isChosen(st.bssid)) cls.push("selected");
     const g = s("g", { class: cls.join(" ") });
     for (const [lo, hi] of st.spans) {
       const xa = x(lo), xz = x(hi);
@@ -316,7 +335,7 @@ function renderSpectrum(container, band, opt) {
   }
   // 選んで付ける名前（全部には付けない）
   const placed = [];
-  const prio = (st) => (st.bssid === selected ? 0 : st.alerts.length ? 1 : st.kind === "own" ? 2 : st.new ? 3 : 4);
+  const prio = (st) => (isChosen(st.bssid) ? 0 : st.alerts.length ? 1 : st.kind === "own" ? 2 : st.new ? 3 : 4);
   const cands = [...stations].filter((q) => q.rssi != null && q.present)
     .sort((p, q) => prio(p) - prio(q) || q.rssi - p.rssi);
   let nLabels = 0;
@@ -348,7 +367,7 @@ function renderSpectrum(container, band, opt) {
     nLabels++;
     labeled.add(keyName);
     const t = s("text", { class: "st-label", x: cx, y: placedY, "text-anchor": "middle", text: label });
-    if (anySel && st.bssid !== selected) t.setAttribute("opacity", 0.3);
+    if (anySel && !isChosen(st.bssid)) t.setAttribute("opacity", 0.3);
     svg.append(t);
   }
 
@@ -384,31 +403,36 @@ function renderSpectrum(container, band, opt) {
       const sx = W / pt.width;
       const px = (ev.clientX - pt.left) * sx, py = (ev.clientY - pt.top) * sx;
       let best = null;
+      const under = new Map(); // ポインタの下にある局（台形の中か、上の辺の近く）。重なっていれば全部
       for (const gq of geo) {
         if (px < gq.xa - 2 || px > gq.xz + 2) continue;
         const d = Math.abs(py - gq.yt);
         if (d <= 14 && (!best || d < best.d)) best = { d, st: gq.st };
+        if (py >= gq.yt - 14 && py <= xb) under.set(gq.st.bssid, gq.st);
       }
+      const hits = [...under.values()].sort((p, q) => (q.rssi ?? -200) - (p.rssi ?? -200));
       let row = null;
       for (const r of channels) {
         const [a, b] = colX(r.freq);
         if (px >= a && px <= b) { row = r; if (band !== "2.4") break; }
       }
-      return { best, row };
+      return { best, row, hits };
     };
     const onMove = (ev) => {
       ui.pointer[band] = { x: ev.clientX, y: ev.clientY };
-      const { best, row } = pick(ev);
-      overlay.style.cursor = best ? "pointer" : "crosshair";
-      if (best) tip.show(ev.clientX, ev.clientY, stationNode(best.st));
+      const { best, row, hits } = pick(ev);
+      overlay.style.cursor = best || hits.length ? "pointer" : "crosshair";
+      if (hits.length > 1) tip.show(ev.clientX, ev.clientY, overlapNode(hits));
+      else if (best || hits.length) tip.show(ev.clientX, ev.clientY, stationNode((best && best.st) || hits[0]));
       else if (row) tip.show(ev.clientX, ev.clientY, channelNode(row));
       else tip.hide();
     };
     overlay.addEventListener("pointermove", onMove);
     overlay.addEventListener("pointerleave", () => { delete ui.pointer[band]; tip.hide(); });
     overlay.addEventListener("click", (ev) => {
-      const { best } = pick(ev);
-      select(best ? best.st.bssid : null);
+      const { best, hits } = pick(ev);
+      if (hits.length > 1) selectMany(hits.map((q) => q.bssid));
+      else select(best ? best.st.bssid : hits.length ? hits[0].bssid : null);
     });
     svg.append(overlay);
     svg._refreshTip = () => {
@@ -517,7 +541,7 @@ function renderCharts(st) {
   const blk = st.own.block;
   const blockSpan = blk.width > 20 ? [blk.center - blk.width / 2, blk.center + blk.width / 2] : null;
   const ownBand = bandOf(st.own.freq);
-  const common = { selected: ui.selected, strong: st.thresholds.strong_rssi_dbm };
+  const common = { selected: selSet(), strong: st.thresholds.strong_rssi_dbm };
   for (const [band, el, hgt, ml] of [["6", "chart6", 300, 14], ["5", "chart5", 150, 5], ["2.4", "chart24", 150, 4]]) {
     renderSpectrum($(el), band, {
       ...common, height: hgt, maxLabels: ml,
@@ -638,9 +662,50 @@ function renderCalibration(st) {
 // ------------------------------------------------------------------ 選択と詳細
 function select(bssid) {
   ui.selected = bssid;
+  ui.selectedMany = null;
   prefs.set("selected", bssid);
   if (ui.state) { renderCharts(ui.state); if (ui.tab === "stations") renderStations(ui.state); }
   if (bssid) openDrawer(bssid); else $("drawer").hidden = true;
+}
+
+/** 重なっているところをクリックしたとき：重なる局を全部選び、全部の詳細を出す（強い順）。 */
+function selectMany(bssids) {
+  ui.selected = bssids[0];
+  ui.selectedMany = bssids;
+  if (ui.state) { renderCharts(ui.state); if (ui.tab === "stations") renderStations(ui.state); }
+  openDrawerMany(bssids);
+}
+
+async function openDrawerMany(bssids) {
+  $("drawer").hidden = false;
+  const got = await Promise.all(bssids.map((b) => api(`/api/stations/${encodeURIComponent(b)}`).catch(() => null)));
+  if (ui.selectedMany !== bssids) return; // 読んでいる間に別のところを選んだ
+  ui.drawerDetails = got.filter(Boolean);
+  renderDrawerMany(bssids.length - ui.drawerDetails.length);
+}
+
+function renderDrawerMany(missing) {
+  const ds = ui.drawerDetails || [];
+  $("drawerTitle").textContent = `重なる局（${ds.length}）`;
+  const body = clear($("drawerBody"));
+  // くらべやすいように、まず一覧（強い順）。行を押すとその局の詳細へ
+  const tb = h("tbody");
+  ds.forEach((d, i) => {
+    const k = kindOf(d.kind);
+    tb.append(h("tr", { onclick: () => $(`multi-${i}`).scrollIntoView({ behavior: "smooth", block: "start" }) },
+      h("td", null, h("span", { class: `glyph ${k.cls}`, text: k.glyph })),
+      h("td", { text: d.ssid || "（非公開SSID）" }),
+      h("td", { class: "num", text: d.rssi_avg ?? d.rssi ?? "—" }),
+      h("td", { text: `ch${chNum(d.freq)}・${d.width_label}MHz` })));
+  });
+  body.append(h("table", { class: "multi-table" },
+    h("thead", null, h("tr", null, h("th", { text: "" }), h("th", { text: "SSID" }), h("th", { class: "num", text: "dBm" }), h("th", { text: "主ch・幅" }))), tb));
+  if (missing > 0) body.append(h("p", { class: "sub", text: `${missing}局は読めませんでした（いなくなった可能性）` }));
+  ds.forEach((d, i) => {
+    const card = h("div", { class: "multi-card", id: `multi-${i}` }, ...detailNodes(d));
+    card.append(h("button", { class: "btn", type: "button", text: "この局だけ開く（タグを付ける）", onclick: () => select(d.bssid) }));
+    body.append(card);
+  });
 }
 
 async function openDrawer(bssid) {
@@ -656,8 +721,16 @@ async function openDrawer(bssid) {
 function renderDrawer() {
   const d = ui.drawerDetail;
   if (!d) return;
-  const k = kindOf(d.kind);
+  $("drawerTitle").textContent = "局の詳細";
   const body = clear($("drawerBody"));
+  body.append(...detailNodes(d));
+  drawerControls(body, d);
+}
+
+/** 局の詳細（事実・警報・手がかり・RNR）。1局のときも、重なる局を並べるときも使う。 */
+function detailNodes(d) {
+  const k = kindOf(d.kind);
+  const body = h("div");
   body.append(
     h("div", { class: "row" }, h("span", { class: `glyph ${k.cls}`, text: k.glyph + " " }), h("span", { text: k.label })),
     h("div", { class: "ssid", text: d.ssid || "（非公開SSID）" }),
@@ -688,6 +761,11 @@ function renderDrawer() {
     for (const r of d.rnr) sec.append(h("div", { class: "sub", text: `知らせている局：${r.bssid || "（BSSIDなし）"}・${r.freq ? chLabel(r.freq) : `op${r.op_class} ch${r.channel}`}` }));
     body.append(sec);
   }
+  return [...body.childNodes];
+}
+
+/** 1局のときだけ：チーム名のタグと端末の一覧。 */
+function drawerControls(body, d) {
   // チーム名のタグ
   const teams = (ui.state?.teams || []).map((t) => t.name);
   const sel = h("select", { "aria-label": "チーム名" }, h("option", { value: "", text: "（選ぶ）" }), ...teams.map((t) => h("option", { value: t, text: t })));
@@ -756,7 +834,7 @@ function renderStations(st) {
   for (const x of rows.slice(0, 400)) {
     const k = kindOf(x.kind);
     const w = Math.max(2, Math.min(60, ((x.rssi ?? -95) + 95) * 0.9));
-    tb.append(h("tr", { class: [x.bssid === ui.selected ? "sel" : "", x.present ? "" : "gone"].join(" "), onclick: () => select(x.bssid) },
+    tb.append(h("tr", { class: [isSel(x.bssid) ? "sel" : "", x.present ? "" : "gone"].join(" "), onclick: () => select(x.bssid) },
       h("td", null, h("span", { class: "kind-cell" }, h("span", { class: `glyph ${k.cls}`, text: k.glyph }), k.label.replace(/（.*）/, ""))),
       h("td", { title: x.bssid }, ssidText(x), x.new ? h("span", { class: "badge new", text: "NEW" }) : null),
       h("td", { text: x.team || x.signature || "—" }),
@@ -1080,7 +1158,7 @@ function render(st) {
   renderTab(false);
   if (!$("drawer").hidden && ui.selected && Date.now() - (ui._drawerAt || 0) > 2000) {
     ui._drawerAt = Date.now();
-    openDrawer(ui.selected);
+    if (ui.selectedMany) openDrawerMany(ui.selectedMany); else openDrawer(ui.selected);
   }
 }
 
