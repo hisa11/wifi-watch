@@ -158,6 +158,9 @@ class BssInfo:
     rnr: list[RnrEntry] = field(default_factory=list)
     vendor_ouis: list[str] = field(default_factory=list)
     ie_fp: str | None = None
+    # 機種の指紋：IEの並び（出たり消えたりするものを除く）と、能力のバイト列（HT/VHT/HE/EHT・拡張能力）。
+    # SSID・BSSID・ch・幅の設定には左右されにくい。同じ機種・同じファームウェアなら同じになりやすい
+    model_fp: str | None = None
     has_ml: bool = False
     has_mbssid: bool = False
 
@@ -359,17 +362,33 @@ def parse_rnr(b: bytes | memoryview, s: int, e: int) -> list[RnrEntry]:
     return out
 
 
+# 機種の指紋から外すIE：TIM（プローブ応答には無い）、チャネル切替の告知、Quiet、BSS Load（付けたり外したりする機器がある）
+_FP_SKIP = {EID_TIM, 37, 40, 60, 11}
+# 能力として指紋に入れるIE（中身のバイト列ごと）
+_FP_CAPS = {EID_HT_CAP, EID_VHT_CAP, 127}
+_FP_CAPS_EXT = {EXT_HE_CAP, EXT_EHT_CAP, EXT_HE_6GHZ_CAP}
+
+
 def parse_bss(buf: bytes | memoryview, off: int, end: int) -> BssInfo:
     """ビーコン・プローブ応答のIE部分（固定部の後ろ）を読む。"""
     info = BssInfo()
     toks: list[str] = []
+    fp = hashlib.sha1()
     for eid, ext, s, e in iter_ies(buf, off, end):
         if eid == EID_EXT:
-            toks.append(f"255.{ext}")
+            tok = f"255.{ext}"
         elif eid == EID_VENDOR and e - s >= 4:
-            toks.append(f"221.{_oui(buf, s)}.{buf[s + 3]}")
+            tok = f"221.{_oui(buf, s)}.{buf[s + 3]}"
         else:
-            toks.append(str(eid))
+            tok = str(eid)
+        toks.append(tok)
+        if eid not in _FP_SKIP:
+            fp.update(tok.encode() + b",")
+            if eid in _FP_CAPS or (eid == EID_EXT and ext in _FP_CAPS_EXT):
+                body = bytearray(buf[s:e])
+                if eid == EID_HT_CAP and len(body) >= 1:
+                    body[0] &= ~0x0E & 0xFF  # 40MHzの可否とSMパワーセーブは設定で変わるので除く
+                fp.update(bytes(body) + b";")
         if eid == EID_SSID:
             raw = bytes(buf[s:e])
             if not raw or raw.count(0) == len(raw):
@@ -422,6 +441,7 @@ def parse_bss(buf: bytes | memoryview, off: int, end: int) -> BssInfo:
             elif ext == EXT_ML:
                 info.has_ml = True
     info.ie_fp = hashlib.sha1(",".join(toks).encode()).hexdigest()[:10]
+    info.model_fp = fp.hexdigest()[:10]
     return info
 
 

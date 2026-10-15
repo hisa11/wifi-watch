@@ -1,0 +1,28 @@
+{
+  "_comment": "機種の表（コードは触らずに追記する）。上から順に見て、最初に当たったものを使う。ssid：正規表現（大文字小文字を区別しない）。名前付きグループ (?P<model>…) は label の {model} に入る。fp：機種の指紋（局の詳細に出る10桁。覚え帳から書き出せる）。vendor_ie：ベンダ固有IEのOUI。oui：BSSIDの先頭3オクテット。category：phone / mobile_router / home_router / wifi_direct / maker / video_tx / other。初期設定のSSIDは利用者が変えられるので、あくまで推定。",
+  "models": [
+    {"label": "Wi-Fi Direct", "category": "wifi_direct", "ssid": ["^DIRECT-"]},
+    {"label": "ESP系マイコン", "category": "maker", "ssid": ["^(ESP[_\\-]|ESP32|ESP8266|espressif)"]},
+    {"label": "Raspberry Pi", "category": "maker", "ssid": ["(raspberry|raspi|^rpi)"]},
+    {"label": "映像伝送（{model}）", "category": "video_tx", "ssid": ["^(?P<model>CineEye)"]},
+
+    {"label": "スマホのテザリング（Google Pixel）", "category": "phone", "ssid": ["^Pixel_\\d{4}$"]},
+    {"label": "スマホのテザリング（Samsung {model}）", "category": "phone", "ssid": ["^(?P<model>Galaxy\\s.+?)(\\s\\d{4})?$"]},
+    {"label": "スマホのテザリング（Sony {model}）", "category": "phone", "ssid": ["^(?P<model>Xperia.*)$"]},
+    {"label": "スマホのテザリング（Sharp {model}）", "category": "phone", "ssid": ["^(?P<model>AQUOS.*)$"]},
+    {"label": "スマホのテザリング（{model}）", "category": "phone", "ssid": ["^(?P<model>arrows\\b.*)$", "^(?P<model>(OPPO|Reno|Xiaomi|Redmi|moto|motorola|Zenfone|Nothing)\\b.*)$", "^(?P<model>POCO\\w*)$"]},
+    {"label": "スマホのテザリング（iPhone）", "category": "phone", "ssid": ["のiPhone", "'s iPhone", "^iPhone"]},
+    {"label": "タブレットのテザリング（iPad）", "category": "phone", "ssid": ["のiPad", "'s iPad", "^iPad"]},
+    {"label": "スマホのテザリング（Android）", "category": "phone", "ssid": ["^Android(AP|Share)", "(androidap|android|galaxy|pixel|xperia|aquos|arrows|oppo|xiaomi|redmi)"]},
+
+    {"label": "モバイルルータ（富士ソフト）", "category": "mobile_router", "ssid": ["^FS0\\d\\dW_"]},
+    {"label": "モバイルルータ（AiR-WiFi）", "category": "mobile_router", "ssid": ["^AiR-WiFi_"]},
+    {"label": "モバイルルータ（Speed Wi-Fi）", "category": "mobile_router", "ssid": ["^Speed\\s?Wi-?Fi"]},
+    {"label": "家庭用ルータ（NEC Aterm）", "category": "home_router", "ssid": ["^aterm-[0-9a-f]{6}-"]},
+    {"label": "家庭用ルータ（ELECOM）", "category": "home_router", "ssid": ["^elecom(2g|5g|6g)?-[0-9a-f]{6}"]},
+    {"label": "家庭用ルータ（Buffalo）", "category": "home_router", "ssid": ["^Buffalo-(G|A|2G|5G|6G)-[0-9A-F]{4}"]},
+    {"label": "家庭用ルータ（TP-Link）", "category": "home_router", "ssid": ["^TP-Link_"]},
+
+    {"label": "Apple機器（iPhone・iPadのテザリングなど）", "category": "phone", "vendor_ie": ["00:17:f2"]}
+  ]
+}

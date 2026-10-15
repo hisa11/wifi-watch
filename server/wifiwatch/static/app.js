@@ -739,9 +739,10 @@ function detailNodes(d) {
   const add = (a, b) => facts.append(h("dt", { text: a }), h("dd", { text: b ?? "—" }));
   add("主ch・幅", `${chLabel(d.freq)}・${d.width_label}MHz（${spanLabel(d.spans)}）${d.dup_beacon ? "・重複ビーコン" : ""}${d.suspect ? "・IEが矛盾" : ""}`);
   add("強さ", d.rssi_avg != null ? `平均 ${d.rssi_avg}dBm（最新 ${d.rssi}・最大 ${d.rssi_max}）` : "—");
-  add("チーム", d.team ? `${d.team}（${{ config: "設定", tag: "手動タグ", ssid: "SSIDのパターン", rnr: "RNRで紐付け", signature: "署名" }[d.team_source] || d.team_source}）` : "—");
+  add("チーム", d.team ? `${d.team}（${{ config: "設定", tag: "手動タグ", ssid: "SSIDのパターン", rnr: "RNRで紐付け", sibling: "同じ機器（BSSIDの並び）", signature: "署名" }[d.team_source] || d.team_source}）` : "—");
   add("署名", d.signature);
   add("機種推定", d.model_guess);
+  if (d.model_fp) add("指紋", `${d.model_fp}（同じ指紋の局 ${d.same_fp ?? "—"}）`);
   add("規格・暗号", `802.11${d.standard}・${d.security}${d.pmf_required ? "（PMF必須）" : ""}`);
   add("最終確認", `${ago(d.age_s)}（${tJST(d.last_seen)}）・この局を「いる」とみなす時間 ${d.window_s}秒`);
   add("初めて見た", dJST(d.first_seen));
@@ -755,17 +756,40 @@ function detailNodes(d) {
         h("div", { class: "t", text: a.title }), h("div", { class: "m", text: a.message })))));
   }
   if (d.hints.length) body.append(h("section", null, h("h3", { text: "機種推定の手がかり" }), h("ul", { class: "hints" }, ...d.hints.map((x) => h("li", { text: x })))));
-  if (d.linked.length || d.rnr.length) {
-    const sec = h("section", null, h("h3", { text: "同じ機器（RNR）" }));
+  if (d.linked.length || d.rnr.length || (d.siblings || []).length) {
+    const sec = h("section", null, h("h3", { text: "同じ機器（RNR・BSSIDの並び）" }));
     for (const b of d.linked) sec.append(h("button", { class: "party", type: "button", onclick: () => select(b), text: b }));
+    for (const b of d.siblings || []) if (!d.linked.includes(b)) sec.append(h("button", { class: "party", type: "button", title: "同じchでBSSIDが並んでいる（非公開SSIDの双子など）", onclick: () => select(b), text: `${b}（並び）` }));
     for (const r of d.rnr) sec.append(h("div", { class: "sub", text: `知らせている局：${r.bssid || "（BSSIDなし）"}・${r.freq ? chLabel(r.freq) : `op${r.op_class} ch${r.channel}`}` }));
     body.append(sec);
   }
   return [...body.childNodes];
 }
 
-/** 1局のときだけ：チーム名のタグと端末の一覧。 */
+/** 1局のときだけ：機種の覚え帳、チーム名のタグ、端末の一覧。 */
 function drawerControls(body, d) {
+  if (d.model_fp) {
+    const inp = h("input", { type: "text", maxlength: 60, placeholder: "例：Buffalo WSR-3200AX4S、操縦用スマホ", "aria-label": "機種の名前" });
+    if (d.model_book) inp.value = d.model_book;
+    const remember = h("button", { class: "btn primary", type: "button", text: "覚える", onclick: async () => {
+      const label = inp.value.trim();
+      if (!label) return toast("機種の名前を入れてください", true);
+      if ((d.same_fp || 0) > 1) {
+        // 指紋は機種ごとに必ず違うとは限らない（同じチップ・同じファームウェアなど）。何局に効くかを見せてから
+        const ok = await confirmDialog("機種を覚える", `同じ指紋の局がいま${d.same_fp}あります。WPSで型番を名乗らない局には、すべて「${label}」と出ます。覚えますか？`, "覚える");
+        if (!ok) return;
+      }
+      try { await api("/api/models", { method: "POST", body: { fp: d.model_fp, label, bssid: d.bssid } }); toast(`「${label}」と覚えました（同じ指紋の局にも出ます）`); openDrawer(d.bssid); }
+      catch (e) { toast(e.message, true); }
+    } });
+    const forget = h("button", { class: "btn", type: "button", text: "忘れる", onclick: async () => {
+      try { await api("/api/models", { method: "POST", body: { fp: d.model_fp, label: null } }); toast("忘れました"); openDrawer(d.bssid); }
+      catch (e) { toast(e.message, true); }
+    } });
+    body.append(h("section", null, h("h3", { text: "機種を覚える（覚え帳）" }),
+      h("p", { class: "sub", text: `指紋 ${d.model_fp}（IEの並びと能力から作る）。覚えると、同じ指紋の局にも同じ機種と出ます。見えた局の情報は外に送りません。` }),
+      h("div", { class: "toolbar" }, inp, remember, d.model_book ? forget : null)));
+  }
   // チーム名のタグ
   const teams = (ui.state?.teams || []).map((t) => t.name);
   const sel = h("select", { "aria-label": "チーム名" }, h("option", { value: "", text: "（選ぶ）" }), ...teams.map((t) => h("option", { value: t, text: t })));
@@ -1099,8 +1123,36 @@ function renderSettings() {
     h("h3", { text: "自分のch（再起動なしで変更）" }), h("div", { class: "toolbar" }, chSel, wSel, apply),
     h("h3", { style: "margin-top:14px", text: "画面の明るさ" }), theme,
     h("h3", { style: "margin-top:14px", text: "チームと予約ch（config.json）" }), h("div", { id: "setTeams" }),
-    h("h3", { style: "margin-top:14px", text: "通知と中継" }), h("div", { id: "setLinks" }));
+    h("h3", { style: "margin-top:14px", text: "通知と中継" }), h("div", { id: "setLinks" }),
+    h("h3", { style: "margin-top:14px", text: "機種の覚え帳" }), h("div", { id: "setModels" }));
   renderSettingsLive();
+  renderModelBook();
+}
+
+/** 覚え帳の一覧。機種の表（models.json）に移すときは「表の形で書き出す」をそのまま貼る。 */
+async function renderModelBook() {
+  const el = $("setModels");
+  if (!el) return;
+  let b;
+  try { b = await api("/api/models"); } catch (e) { clear(el).append(h("p", { class: "sub", text: `読めませんでした：${e.message}` })); return; }
+  const t = h("table", { class: "data" }, h("thead", null, h("tr", null, h("th", { text: "機種" }), h("th", { text: "指紋" }), h("th", { class: "num", text: "いま見えている" }), h("th", { text: "" }))));
+  const tb = h("tbody");
+  for (const e of b.entries) {
+    tb.append(h("tr", null, h("td", { text: e.label }), h("td", { class: "mono", text: e.fp }), h("td", { class: "num", text: e.now }),
+      h("td", null, h("button", { class: "btn", type: "button", text: "忘れる", onclick: async (ev) => {
+        ev.stopPropagation();
+        try { await api("/api/models", { method: "POST", body: { fp: e.fp, label: null } }); renderModelBook(); } catch (er) { toast(er.message, true); }
+      } }))));
+  }
+  t.append(tb);
+  const dl = h("button", { class: "btn", type: "button", text: "表の形で書き出す（models.json に貼る）", disabled: !b.entries.length, onclick: () => {
+    const blob = new Blob([JSON.stringify(b.export, null, 2)], { type: "application/json" });
+    const a = h("a", { href: URL.createObjectURL(blob), download: "model_book_export.json" });
+    document.body.append(a); a.click(); a.remove();
+  } });
+  clear(el).append(
+    h("p", { class: "sub", text: `覚え帳 ${b.entries.length}件・機種の表 ${b.rules}行（models.json）。局の詳細の「機種を覚える」で増やせます。` }),
+    b.entries.length ? h("div", { class: "table-wrap" }, t) : null, h("div", { class: "toolbar" }, dl));
 }
 function renderSettingsLive() {
   const st = ui.state;
@@ -1156,7 +1208,9 @@ function render(st) {
   $("cntStations").textContent = st.stations.filter((q) => q.present).length;
   $("cntClients").textContent = st.clients;
   renderTab(false);
-  if (!$("drawer").hidden && ui.selected && Date.now() - (ui._drawerAt || 0) > 2000) {
+  // 引き出しで入力している間（タグ・機種の名前）は作り直さない（打った文字が消えないように）
+  const typing = $("drawer").contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+  if (!$("drawer").hidden && ui.selected && !typing && Date.now() - (ui._drawerAt || 0) > 2000) {
     ui._drawerAt = Date.now();
     if (ui.selectedMany) openDrawerMany(ui.selectedMany); else openDrawer(ui.selected);
   }

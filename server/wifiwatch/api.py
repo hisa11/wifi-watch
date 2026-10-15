@@ -153,6 +153,17 @@ def create_app(ctl: Controller, port: int) -> FastAPI:
         d = await body(request)
         return ctl.tag(str(d.get("bssid", "")).lower(), d.get("team"), "desktop")
 
+    # 機種の覚え帳：指紋ごとに機種の名前を覚える（同じ指紋の局にも出る）。label を null にすると忘れる
+    @app.get("/api/models")
+    def models() -> Any:
+        return ctl.model_book()
+
+    @app.post("/api/models")
+    async def remember_model(request: Request) -> Any:
+        d = await body(request)
+        b = d.get("bssid")
+        return ctl.remember_model(d.get("fp"), d.get("label"), b.lower() if isinstance(b, str) else None, "desktop")
+
     # -------------------------------------------------------------- 画面
     @app.get("/")
     def index() -> FileResponse:

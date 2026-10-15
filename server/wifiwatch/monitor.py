@@ -13,7 +13,7 @@ from .analyzer.alerts import AlertEvent, AlertManager
 from .analyzer.core import Analyzer
 from .analyzer.detect import Detector
 from .calibration import calibrate
-from .classify import Classifier, OuiDb, load_signatures
+from .classify import Classifier, ModelBook, OuiDb, load_signatures
 from .clock import Clock, RealClock
 from .config import Config, Overrides
 from .engine import Engine
@@ -70,7 +70,8 @@ class Monitor:
                 log.warning("radiod にまだ届きません（受信ループで再接続します）")
         self.engine = Engine(self.clock, self.radio, self.analyzer, self.scheduler, device=cfg.device_name)
         self.signatures = load_signatures(cfg.signatures)
-        self.classifier = Classifier(cfg, self.signatures, oui if oui is not None else OuiDb(), tags)
+        self.classifier = Classifier(cfg, self.signatures, oui if oui is not None else OuiDb(), tags,
+                                     book=ModelBook(Path(cfg.data_dir) / "model_book.json"))
         self.engine.classify = lambda st: self.classifier.classify(st, self.analyzer.table)
         th = cfg.thresholds
         self.alerts = AlertManager(self.clock, th.clear_after_s, th.renotify_suppress_s, th.levels,

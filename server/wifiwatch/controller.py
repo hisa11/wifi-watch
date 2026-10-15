@@ -18,6 +18,7 @@ from typing import Any, Callable
 from . import channels as ch
 from .analyzer.alerts import AlertEvent
 from .analyzer.occupancy import OccupancyContext, channel_rows, present_stations, suggestions
+from .classify import FP_RE
 from .clock import Clock, jst_str, utc_iso
 from .config import Config
 from .logs import FileLogs, write_own
@@ -282,6 +283,33 @@ class Controller:
                        f"{bssid} → {team or '（外した）'}", origin)
         return {"bssid": bssid, "team": team}
 
+    # ------------------------------------------------------------ 機種の覚え帳（デスクトップの画面だけ）
+    def remember_model(self, fp: Any, label: Any, bssid: Any = None, origin: str = "desktop") -> dict[str, Any]:
+        """指紋（model_fp）に機種の名前を覚える。label が空なら忘れる。同じ指紋の局すべてに出る。"""
+        if origin != "desktop":
+            raise ControlError(403, "desktop_only", "機種の覚え帳はデスクトップの画面だけで変えられます")
+        if not isinstance(fp, str) or not FP_RE.match(fp):
+            raise ControlError(400, "bad_fp", "指紋が不正です（10桁の16進）")
+        if label is not None and (not isinstance(label, str) or not (1 <= len(label.strip()) <= 60)):
+            raise ControlError(400, "bad_label", "機種の名前は1〜60文字です")
+        if bssid is not None and (not isinstance(bssid, str) or not BSSID_RE.match(bssid)):
+            raise ControlError(400, "bad_bssid", "BSSIDが不正です")
+        label = label.strip() if isinstance(label, str) and label.strip() else None
+        self.mon.classifier.book.set(fp, label, bssid, self.clock.time())
+        self.mon.classifier.classify_all(self.mon.analyzer.table)
+        self.log_event("model", "set" if label else "clear", "info", fp, "機種の覚え帳",
+                       f"指紋 {fp} → {label or '（忘れた）'}", origin)
+        return {"fp": fp, "label": label}
+
+    def model_book(self) -> dict[str, Any]:
+        c = self.mon.classifier
+        sts = self.mon.analyzer.table.all()
+        entries = []
+        for fp, e in sorted(c.book.entries.items(), key=lambda kv: -kv[1].get("at", 0)):
+            entries.append({"fp": fp, "label": e.get("label"), "at": e.get("at"), "examples": e.get("examples", []),
+                            "now": sum(1 for s in sts if s.model_fp == fp)})
+        return {"entries": entries, "export": c.book.export(), "rules": len(c.model_rules)}
+
     # ------------------------------------------------------------ 記録とラベル
     @staticmethod
     def clean_label(label: Any) -> dict[str, Any]:
@@ -409,6 +437,7 @@ class Controller:
                 "ch": ch.freq_to_number(st.primary_freq), "width": st.width, "width_label": st.width_label,
                 "spans": [[x.lo, x.hi] for x in st.spans], "rssi": None if st.rssi_avg is None else round(st.rssi_avg),
                 "kind": st.kind or "unknown", "team": st.team, "model": st.model_guess, "signature": st.signature,
+                "model_fp": st.model_fp,
                 "standard": st.standard, "security": st.security, "age_s": round(age, 1), "present": age <= win,
                 "window_s": round(win), "alerts": alerting.get(st.bssid, []),
                 "new": st.bssid in self.mon.detector.newcomers, "dup_beacon": st.dup_beacon,
@@ -425,6 +454,9 @@ class Controller:
         d["age_s"] = round(self.clock.monotonic() - st.last_seen_mono, 1)
         d["window_s"] = round(self.mon.scheduler.presence_window(st.primary_freq))
         d["clients"] = [c.to_dict() for c in list(self.mon.analyzer.table.clients.values()) if c.bssid == bssid][:50]
+        book = self.mon.classifier.book.get(st.model_fp)
+        d["model_book"] = book.get("label") if book else None
+        d["same_fp"] = sum(1 for o in self.mon.analyzer.table.all() if st.model_fp and o.model_fp == st.model_fp)
         return d
 
     def clients(self) -> list[dict[str, Any]]:

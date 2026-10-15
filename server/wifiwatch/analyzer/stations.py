@@ -38,6 +38,7 @@ class Station:
     vendor_ouis: list[str] = field(default_factory=list)
     ie_fp: str | None = None
     he_cap_fp: str | None = None
+    model_fp: str | None = None
     eht_320_cap: bool = False
     rnr: list[dict[str, Any]] = field(default_factory=list)
     first_seen: float = 0.0  # UTC epoch
@@ -62,6 +63,7 @@ class Station:
     model_guess: str | None = None
     hints: list[str] = field(default_factory=list)
     linked: list[str] = field(default_factory=list)  # RNRで同じ機器と分かった局
+    siblings: list[str] = field(default_factory=list)  # BSSIDの並びで同じ機器と分かった局（非公開SSIDの双子など）
 
     @property
     def freq_label(self) -> str:
@@ -106,6 +108,8 @@ class Station:
             "model_guess": self.model_guess,
             "hints": list(self.hints),
             "linked": list(self.linked),
+            "siblings": list(self.siblings),
+            "model_fp": self.model_fp,
             "rnr": list(self.rnr),
             "moved_from": self.prev_primary_freq,
             "moved_at": self.moved_at,
@@ -207,6 +211,7 @@ class StationTable:
                                         ("model_number", info.wps.model_number), ("device_name", info.wps.device_name)) if v}
         st.vendor_ouis = list(info.vendor_ouis)
         st.ie_fp = info.ie_fp
+        st.model_fp = info.model_fp
         st.he_cap_fp = info.he_cap_fp
         st.eht_320_cap = info.eht_320
         st.rnr = [{"freq": r.freq, "bssid": r.bssid, "colocated": r.colocated, "same_ssid": r.same_ssid,

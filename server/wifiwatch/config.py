@@ -226,7 +226,12 @@ class Config(_Strict):
     radio: RadioConfig = RadioConfig()
     data_dir: str = "data"
     signatures: str = "signatures.json"
+    # 機種の表（初期設定のSSID・指紋など）。省略すると signatures と同じフォルダの models.json
+    models: str | None = None
     device_name: str = "pit-pc"
+
+    def models_path(self) -> str:
+        return self.models or str(Path(self.signatures).parent / "models.json")
 
     @field_validator("interface")
     @classmethod
@@ -302,6 +307,8 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         cfg.data_dir = str(base / cfg.data_dir)
     if not os.path.isabs(cfg.signatures):
         cfg.signatures = str(base / cfg.signatures)
+    if cfg.models and not os.path.isabs(cfg.models):
+        cfg.models = str(base / cfg.models)
     if cfg.radio.fake_scenario and not os.path.isabs(cfg.radio.fake_scenario):
         cfg.radio.fake_scenario = str(base / cfg.radio.fake_scenario)
     return cfg

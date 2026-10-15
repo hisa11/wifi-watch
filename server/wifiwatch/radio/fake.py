@@ -258,10 +258,17 @@ def demo_scenario() -> Scenario:
         SimStation("02:c0:00:00:00:01", "KOSEN-C-6G", ch.parse_channel_ref("6g45"), 20, -70, data_rate=20),
         # PSC
         SimStation("02:d0:00:00:00:01", "DIRECT-ab-Pixel", ch.parse_channel_ref("6g21"), 20, -75),
-        # 5GHz：RoboconFree（ch100〜144に乱立）
+        # 5GHz：公式のFree Wi-Fi（過去の全国大会：W56のch100〜128に1台ずつ、20MHz、-60〜-73dBm）とスタッフ用（ch140）
         *[SimStation(f"02:52:46:00:01:{i:02x}", "ROBOCON_Free_Wi-Fi", ch.parse_channel_ref(f"5g{n}"), 20,
-                     -60 - (i % 4) * 5, data_rate=30)
-          for i, n in enumerate((100, 108, 116, 124, 132, 140, 144))],
+                     (-61, -73, -73, -72, -73, -67, -61, -60)[i], data_rate=30)
+          for i, n in enumerate((100, 104, 108, 112, 116, 120, 124, 128))],
+        SimStation("02:52:46:00:03:01", "ROBOCON_Staff_W", ch.parse_channel_ref("5g140"), 20, -54, data_rate=20),
+        SimStation("02:52:46:00:03:02", "ROBOCON_Staff_W", ch.parse_channel_ref("5g140"), 20, -64, data_rate=10),
+        # 5GHzに残ったチームのAPと、同じ機器の非公開SSID（全国大会の not-togetoge-5g と *hidden*）
+        SimStation("02:4e:54:00:00:10", "not-togetoge-5g", ch.parse_channel_ref("5g136"), 20, -35, data_rate=60),
+        SimStation("02:4e:54:00:00:11", "not-togetoge-5g", ch.parse_channel_ref("5g136"), 20, -36, ap={"hidden": True}),
+        # 観客のスマホのテザリング（80MHz、主ch132）
+        SimStation("02:58:50:00:00:01", "xperia5", ch.parse_channel_ref("5g132"), 80, -84, data_rate=5),
         # 5GHz：CineEye（桁違いに強い）
         SimStation("02:6c:5a:00:00:01", "CineEye2-1234", ch.parse_channel_ref("5g44"), 40, -31,
                    standard="ac", data_rate=400),
@@ -274,5 +281,20 @@ def demo_scenario() -> Scenario:
         SimStation("b8:27:eb:00:00:01", "raspberrypi", ch.parse_channel_ref("2g1"), 20, -68, standard="n", data_rate=5),
         SimStation("24:6f:28:00:00:01", "ESP_1A2B3C", ch.parse_channel_ref("2g6"), 20, -72, standard="n"),
         SimStation("02:52:46:00:02:01", "ROBOCON_Free_Wi-Fi", ch.parse_channel_ref("2g11"), 20, -64, standard="n", data_rate=20),
+        # 2.4GHz：観客のスマホ・モバイルルータ・家庭用ルータ（地区大会の様子。初期設定のSSIDが多い）
+        *[SimStation(b, ssid, ch.parse_channel_ref(f"2g{n}"), w, r, standard="n", ap=ap)
+          for b, ssid, n, w, r, ap in (
+              ("02:3a:9d:8a:2a:47", "aterm-8a2a47-g", 1, 20, -59, {}),
+              ("02:3a:9d:8a:2a:48", "aterm-8a2a47-w", 1, 20, -60, {}),  # 同じ機器の2つ目のSSID（BSSIDが並ぶ）
+              ("02:e0:4c:53:3f:f9", "elecom-533ff9", 1, 20, -63, {}),
+              ("02:a1:b2:36:98:01", "Pixel_3698", 1, 20, -68, {}),
+              ("02:a1:b2:00:07:01", "hidden", 7, 20, -61, {"hidden": True}),
+              ("02:f5:03:77:30:01", "FS030W_P377301", 6, 20, -60, {}),
+              ("02:a1:b2:00:09:01", "AI-WIFI", 9, 20, -60, {}),
+              ("02:a1:b2:00:0b:01", "Galaxy Z Fold6 5734", 11, 20, -70, {}),
+              ("02:a1:b2:00:0b:02", "Xperia 10 VII", 11, 20, -73, {}),
+              ("02:a1:b2:00:06:01", "susumuのiPhone", 6, 20, -74, {"vendor": [build.vendor_ie("00:17:f2", 0x0a, b"\x00\x01\x03\x01\x00\x00")]}),
+              ("02:a1:b2:00:06:02", "AiR-WiFi_0ZQUF7", 6, 20, -79, {}),
+          )],
     ]
     return Scenario(st, seed=7)

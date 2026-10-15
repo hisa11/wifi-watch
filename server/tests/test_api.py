@@ -189,6 +189,26 @@ def test_own_channel_change_and_tag(env):
     assert app.store.tags()["00:1d:73:11:22:33"] == "C高専"
 
 
+def test_model_book_api(env):
+    app, c, clk = env
+    st = c.get("/api/stations/02:a0:00:00:00:01").json()  # KOSEN-A-6G（見本）
+    fp = st["model_fp"]
+    assert fp and len(fp) == 10
+    assert c.post("/api/models", json={"fp": fp, "label": "GL.iNet GL-BE3600"}).status_code == 403  # 独自ヘッダが要る
+    assert c.post("/api/models", json={"fp": "zz", "label": "x"}, headers=W).status_code == 400
+    r = c.post("/api/models", json={"fp": fp, "label": "GL.iNet GL-BE3600", "bssid": "02:A0:00:00:00:01"}, headers=W)
+    assert r.status_code == 200
+    st = c.get("/api/stations/02:a0:00:00:00:01").json()
+    assert st["model_guess"] == "GL.iNet GL-BE3600" and any("覚え帳" in h for h in st["hints"])
+    book = c.get("/api/models").json()
+    assert book["entries"][0]["fp"] == fp and book["entries"][0]["now"] >= 1 and book["rules"] > 10
+    assert {"label": "GL.iNet GL-BE3600", "category": "other", "fp": [fp]} in book["export"]
+    with pytest.raises(Exception):
+        app.controller.remember_model(fp, "x", None, "app")  # アプリ・中継からは変えられない
+    assert c.post("/api/models", json={"fp": fp, "label": None}, headers=W).status_code == 200
+    assert c.get("/api/models").json()["entries"] == []
+
+
 def test_idempotent_request_ids(env):
     app, c, clk = env
     a = app.controller.manual_scan(bands=["6"], origin="app", request_id="req-1")

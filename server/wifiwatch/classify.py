@@ -3,8 +3,12 @@
 判定の順（先に決まったものが勝つ）：
   自チーム（BSSID。BSSIDが未設定ならSSID）→ 既知で問題のない局（known_ok_bssids）→ 手動のチーム名タグ
   → configのチーム対応表（BSSID）→ 署名（signatures.json：SSIDのパターン・OUI）→ configのチーム対応表（SSIDのパターン）
-  → RNRで紐付いた同じ機器のチーム → 不明
+  → RNRで紐付いた同じ機器・BSSIDの並びで分かる同じ機器（非公開SSIDの双子）のチーム → 不明
 色分け：他高専＝黄（交渉できる）、公式インフラ・放送機材＝赤（交渉できない）。
+
+機種推定の順：覚え帳で「この局は◯◯」と覚えた局 → WPS（機器が名乗るメーカー・型番）→ 機種の表のSSID（初期設定の名前）
+  → 覚え帳の同じ指紋 → 機種の表のほか（指紋・ベンダIE・OUI）→ OUIのメーカー → ベンダIEのチップ。
+指紋（model_fp）は、IEの並びと能力のバイト列から作る（capture/ies.py）。見えた局の情報は外に送らない。
 """
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ from typing import Any, Iterable
 
 from .analyzer.stations import Station, StationTable
 from .capture.dot11 import is_local_admin
-from .config import Config
+from .config import Config, atomic_write_json
 
 log = logging.getLogger(__name__)
 
@@ -37,14 +41,100 @@ VENDOR_IE_HINTS = {
     "f4:f5:e8": "Google", "00:1d:0f": "TP-Link", "00:a0:40": "Apple", "00:16:32": "Samsung",
 }
 
-_SSID_HINTS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"^DIRECT-", re.I), "Wi-Fi Direct"),
-    (re.compile(r"^(ESP[_\-]|ESP32|ESP8266|espressif)", re.I), "ESP系マイコン"),
-    (re.compile(r"(raspberry|raspi|^rpi)", re.I), "Raspberry Pi"),
-    (re.compile(r"(iphone|ipad)", re.I), "スマホのテザリング（iPhone）"),
-    (re.compile(r"(androidap|android|galaxy|pixel|xperia|aquos|arrows|oppo|xiaomi|redmi)", re.I),
-     "スマホのテザリング（Android）"),
-]
+MODEL_CATEGORIES = ("phone", "mobile_router", "home_router", "wifi_direct", "maker", "video_tx", "other")
+
+
+@dataclass
+class ModelRule:
+    """機種の表（models.json）の1行。SSID・指紋・ベンダIE・OUIのどれかが当たれば、その機種とみなす。"""
+    label: str
+    category: str
+    ssid: list[re.Pattern[str]]
+    fp: set[str]
+    vendor_ie: set[str]
+    oui: set[str]
+
+    def match(self, st: Station) -> tuple[str, str] | None:
+        """当たれば（ラベル, 何で当たったか）。"""
+        if st.model_fp and st.model_fp in self.fp:
+            return self.label.replace("{model}", ""), f"指紋 {st.model_fp}"
+        if st.ssid:
+            for pat in self.ssid:
+                m = pat.search(st.ssid)
+                if m:
+                    model = (m.groupdict().get("model") or "").strip()
+                    return self.label.replace("{model}", model), "SSID"
+        if self.vendor_ie and any(o in self.vendor_ie for o in st.vendor_ouis):
+            return self.label, "ベンダIE"
+        if self.oui and st.bssid[:8] in self.oui:
+            return self.label, "OUI"
+        return None
+
+
+def load_model_rules(path: str | Path) -> list[ModelRule]:
+    p = Path(path)
+    if not p.exists() and not p.is_absolute():
+        p = Path(__file__).resolve().parents[2] / p  # リポジトリの直下（設定ファイルを使わないテストなど）
+    if not p.exists():
+        log.warning("機種の表がありません: %s", p)
+        return []
+    data = json.loads(p.read_text(encoding="utf-8"))
+    out = []
+    for i, m in enumerate(data.get("models", [])):
+        cat = m.get("category", "other")
+        if cat not in MODEL_CATEGORIES:
+            raise ValueError(f"models[{i}].category が不正です：{cat}")
+        label = str(m.get("label", "")).strip()
+        if not label:
+            raise ValueError(f"models[{i}].label がありません")
+        try:
+            pats = [re.compile(x, re.I) for x in m.get("ssid", [])]
+        except re.error as e:
+            raise ValueError(f"models[{i}].ssid の正規表現が不正です：{e}") from None
+        out.append(ModelRule(label, cat, pats, {str(x).lower() for x in m.get("fp", [])},
+                             {str(x).lower() for x in m.get("vendor_ie", [])}, {str(x).lower() for x in m.get("oui", [])}))
+    return out
+
+
+FP_RE = re.compile(r"^[0-9a-f]{10}$")
+
+
+class ModelBook:
+    """覚え帳：画面で「この局は◯◯」と覚えた機種。指紋（model_fp）ごとに持ち、同じ指紋の局にも出す。
+
+    data_dir/model_book.json に置く（再起動しても残る）。表（models.json）に移すときは export() の形をそのまま貼る。
+    """
+
+    def __init__(self, path: str | Path | None):
+        self.path = Path(path) if path else None
+        self.entries: dict[str, dict[str, Any]] = {}
+        if self.path and self.path.exists():
+            try:
+                self.entries = dict(json.loads(self.path.read_text(encoding="utf-8")).get("entries", {}))
+            except (OSError, ValueError) as e:
+                log.warning("覚え帳を読めません（%s）：%s", self.path, e)
+
+    def get(self, fp: str | None) -> dict[str, Any] | None:
+        return self.entries.get(fp) if fp else None
+
+    def set(self, fp: str, label: str | None, bssid: str | None, at: float) -> None:
+        if label:
+            e = self.entries.get(fp) or {"examples": []}
+            e["label"] = label
+            e["at"] = at
+            if bssid and bssid not in e["examples"]:
+                e["examples"] = (e["examples"] + [bssid])[-20:]
+            self.entries[fp] = e
+        else:
+            self.entries.pop(fp, None)
+        if self.path:
+            atomic_write_json(self.path, {"version": 1, "entries": self.entries})
+
+    def export(self) -> list[dict[str, Any]]:
+        """機種の表（models.json）にそのまま貼れる形。"""
+        return [{"label": e["label"], "category": "other", "fp": [fp]} for fp, e in sorted(self.entries.items())]
+
+
 
 
 @dataclass
@@ -114,10 +204,13 @@ class OuiDb:
 
 class Classifier:
     def __init__(self, cfg: Config, signatures: list[Signature], oui: OuiDb | None = None,
-                 tags: dict[str, str] | None = None):
+                 tags: dict[str, str] | None = None, model_rules: list[ModelRule] | None = None,
+                 book: ModelBook | None = None):
         self.cfg = cfg
         self.signatures = signatures
         self.oui = oui
+        self.model_rules = model_rules if model_rules is not None else load_model_rules(cfg.models_path())
+        self.book = book or ModelBook(None)
         self.tags: dict[str, str] = dict(tags or {})  # BSSID → チーム名（画面での手動タグ）
         self._own_bssids = set(cfg.own.bssids)
         self._known_ok = set(cfg.known_ok_bssids)
@@ -167,9 +260,15 @@ class Classifier:
                         kind, team, source, negotiable = "team", name, "ssid", True
                         break
         if kind == "unknown" and table is not None:
-            for other in self._linked(st, table):
+            for other, how in self._linked(st, table):
                 if other.team and other.kind == "team":
-                    kind, team, source, negotiable = "team", other.team, "rnr", True
+                    kind, team, source, negotiable = "team", other.team, how, True
+                    break
+                if how == "sibling" and other.kind in ("own", "official_infra", "broadcast", "known_ok"):
+                    # 非公開SSIDの双子：同じ機器なので同じ扱い（自チームの双子を「所属不明の強い局」にしない）
+                    kind, negotiable = other.kind, other.negotiable
+                    team, source = other.team, "sibling"
+                    sig = self.signature_of(other)
                     break
         st.kind = kind
         st.team = team
@@ -178,22 +277,28 @@ class Classifier:
         st.signature = sig.name if sig else None
         st.model_guess, st.hints = self.guess(st, table)
 
-    def _linked(self, st: Station, table: StationTable) -> list[Station]:
+    def _linked(self, st: Station, table: StationTable) -> list[tuple[Station, str]]:
+        """同じ機器と分かった局（RNRで紐付いたもの、BSSIDの並びで分かる双子）と、その分かり方。"""
         out = []
         for b in st.linked:
             o = table.get(b)
             if o is not None:
-                out.append(o)
+                out.append((o, "rnr"))
+        for b in st.siblings:
+            o = table.get(b)
+            if o is not None and b not in st.linked:
+                out.append((o, "sibling"))
         return out
 
     def guess(self, st: Station, table: StationTable | None = None) -> tuple[str | None, list[str]]:
         hints: list[str] = []
         wps = st.wps
-        if not wps and table is not None:  # 6GHzはWPSが無い。RNRで紐付いた2.4/5GHz側から借りる
-            for o in self._linked(st, table):
+        if not wps and table is not None:  # 6GHzはWPSが無い。RNRで紐付いた2.4/5GHz側（や双子）から借りる
+            for o, how in self._linked(st, table):
                 if o.wps:
                     wps = o.wps
-                    hints.append(f"RNRで{o.band}GHz側（{o.bssid}）と同じ機器")
+                    hints.append(f"RNRで{o.band}GHz側（{o.bssid}）と同じ機器" if how == "rnr"
+                                 else f"BSSIDの並びで{o.bssid}と同じ機器")
                     break
         random_mac = is_local_admin(st.bssid)
         vendor = None if random_mac else (self.oui.lookup(st.bssid) if self.oui else None)
@@ -201,13 +306,13 @@ class Classifier:
             hints.append("ランダムMAC（ローカル管理）")
         elif vendor:
             hints.append(f"OUI: {vendor}")
-        ssid_hint = None
-        if st.ssid:
-            for pat, label in _SSID_HINTS:
-                if pat.search(st.ssid):
-                    ssid_hint = label
-                    hints.append(f"SSIDの傾向: {label}")
-                    break
+        rule_hit = None
+        for rule in self.model_rules:
+            hit = rule.match(st)
+            if hit:
+                rule_hit = hit
+                hints.append(f"機種の表（{hit[1]}）: {hit[0]}")
+                break
         chips = sorted({VENDOR_IE_HINTS[o] for o in st.vendor_ouis if o in VENDOR_IE_HINTS})
         if chips:
             hints.append("ベンダIE: " + ", ".join(chips))
@@ -219,12 +324,24 @@ class Classifier:
             hints.append(f"BSS Color: {st.bss_color}")
         if st.eht_320_cap:
             hints.append("320MHz対応（EHT）")
+        if st.model_fp:
+            hints.append(f"指紋: {st.model_fp}")
+        book = self.book.get(st.model_fp)
         model = None
-        if wps:
+        if book and st.bssid in book.get("examples", []):
+            model = book["label"]  # この局そのものを覚えた
+            hints.insert(0, f"覚え帳：この局を「{model}」と覚えています")
+        if model is None and wps:
             parts = [wps.get("manufacturer"), wps.get("model_name"), wps.get("model_number")]
             model = " ".join(p for p in parts if p) or None
-        if model is None and ssid_hint:
-            model = ssid_hint
+        # その局のSSIDから分かること（初期設定の名前）は、別の局から指紋で借りた推定より強い
+        if model is None and rule_hit and rule_hit[1] == "SSID":
+            model = rule_hit[0]
+        if model is None and book:
+            model = book["label"]
+            hints.insert(0, f"覚え帳：同じ指紋（{st.model_fp}）の局を「{model}」と覚えています")
+        if model is None and rule_hit:
+            model = rule_hit[0]
         if model is None and vendor:
             model = vendor
         if model is None and chips:
@@ -246,8 +363,27 @@ class Classifier:
                     if other is not None and st.bssid not in other.linked:
                         other.linked.append(st.bssid)
 
+    def link_siblings(self, table: StationTable) -> None:
+        """BSSIDの並びで分かる同じ機器（非公開SSIDの双子など）を紐付ける。
+
+        同じ主chで、BSSIDの先頭5オクテットが同じ（1オクテット目はローカル管理のビットを除いて比べる）局どうし。
+        例：00:00:5e:00:53:30（名前あり）と :31・:32（非公開）。
+        """
+        with table.lock:
+            groups: dict[tuple[int, str], list[Station]] = {}
+            for st in table.all():
+                o = st.bssid.split(":")
+                if len(o) != 6:
+                    continue
+                key = (st.primary_freq, f"{int(o[0], 16) & ~0x02:02x}:" + ":".join(o[1:5]))
+                groups.setdefault(key, []).append(st)
+            for sts in groups.values():
+                for st in sts:
+                    st.siblings = [o.bssid for o in sts if o is not st] if len(sts) > 1 else []
+
     def classify_all(self, table: StationTable) -> None:
         self.link_rnr(table)
+        self.link_siblings(table)
         sts = table.all()
         for st in sts:
             self.classify(st, None)
