@@ -191,6 +191,13 @@ body.stale .layout { opacity: 0.6; }
 @media (max-width: 1200px) {
   .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "six" "side" "five" "two4" "lower"; }
 }
+/* 1つの帯域だけ表示：ほかを隠し、選んだ帯域を6GHzの場所（横2列）に大きく描く */
+.viewbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px 0; font-size: 12px; color: var(--ink-2); }
+.viewbar .hint { color: var(--muted); }
+.layout.solo .spectrum, .layout.solo .area-five, .layout.solo .area-two4 { display: none; }
+.layout.solo-6 .spectrum, .layout.solo-5 .area-five, .layout.solo-24 .area-two4 { display: block; grid-area: six; }
+.band-title { cursor: pointer; }
+.band-title:hover { text-decoration: underline; text-decoration-color: var(--border-strong); }
 
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;

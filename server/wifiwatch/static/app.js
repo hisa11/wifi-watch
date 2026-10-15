@@ -160,6 +160,7 @@ const ui = {
   stFilter: prefs.get("stFilter", { band: "all", kind: "all", present: true, q: "" }),
   stSort: prefs.get("stSort", { key: "rssi", asc: false }),
   pointer: {},
+  bandView: prefs.get("bandView", "all"),
   records: { list: [], selected: null, detail: null, filter: { kind: "", location: "", band: "" }, lastFetch: 0 },
   events: { list: [], category: "", lastFetch: 0 },
   clients: { list: [], lastFetch: 0 },
@@ -564,7 +565,7 @@ function renderLegend() {
   lg.append(h("span", { class: "item" }, h("span", { class: "sw-own" }), "自分の帯域"),
     h("span", { class: "item" }, h("span", { class: "sw-hatch" }), "見ていないch（巡回外・停止中・未観測）"),
     h("span", { class: "item" }, h("span", { class: "sw-problem" }), "強い局が3つ以上（!）"),
-    h("span", { class: "item", text: "⚠ 警報の当事者・薄い線は最近いない局" }));
+    h("span", { class: "item", text: "⚠ 警報の当事者" }));
 }
 
 function bandStats(el, st, band) {
@@ -580,6 +581,48 @@ function bandStats(el, st, band) {
     h("span", null, "見ていないch ", h("b", { text: `${blind}/${rows.length}` }))].filter(Boolean));
 }
 
+// ------------------------------------------------------------------ 表示する帯域（全部か、1つだけ大きく）
+const BAND_VIEWS = [["all", "全部"], ["6", "6GHz"], ["5", "5GHz"], ["2.4", "2.4GHz"]];
+const SOLO_CLASS = { "6": "solo-6", "5": "solo-5", "2.4": "solo-24" };
+const BAND_CARD = { "6": "h6", "5": "h5", "2.4": "h24" };
+
+function buildViewbar() {
+  const bar = clear($("viewbar"));
+  bar.append(h("span", { text: "表示する帯域" }), segControl(BAND_VIEWS, ui.bandView, setBandView),
+    h("span", { class: "hint", text: "グラフの見出しを押しても切り替わります（キー 6・5・2、0で全部）" }));
+  for (const [band, id] of Object.entries(BAND_CARD)) {
+    const t = $(id);
+    t.classList.add("band-title");
+    t.title = "押すと、この帯域だけを大きく表示（もう一度で全部）";
+    t.addEventListener("click", () => setBandView(ui.bandView === band ? "all" : band));
+  }
+}
+
+function setBandView(v) {
+  if (!BAND_VIEWS.some(([k]) => k === v)) return;
+  ui.bandView = v;
+  prefs.set("bandView", v);
+  applyBandView();
+  if (ui.state) renderCharts(ui.state);
+}
+
+function applyBandView() {
+  const lay = $("layout");
+  lay.classList.remove("solo", ...Object.values(SOLO_CLASS));
+  const solo = ui.bandView !== "all";
+  if (solo) lay.classList.add("solo", SOLO_CLASS[ui.bandView]);
+  for (const b of $("viewbar").querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.textContent === BAND_VIEWS.find(([k]) => k === ui.bandView)[1]));
+  // 凡例は、見えているグラフのカードに置く
+  const card = $(BAND_CARD[solo ? ui.bandView : "6"]).closest(".card");
+  const lg = $("legend");
+  if (lg.parentElement !== card) card.insertBefore(lg, card.querySelector(".chart"));
+}
+
+/** 1つだけ表示のときのグラフの高さ：画面の高さに合わせる（下のタブの見出しが少し見えるくらい）。 */
+function soloHeight() {
+  return Math.round(Math.max(300, Math.min(window.innerHeight - 300, 760)));
+}
+
 function renderCharts(st) {
   const ownRows = st.channels.filter((r) => r.own_band);
   const ownSpans = mergeSpans(ownRows.map((r) => [r.freq - 10, r.freq + 10]));
@@ -587,7 +630,10 @@ function renderCharts(st) {
   const blockSpan = blk.width > 20 ? [blk.center - blk.width / 2, blk.center + blk.width / 2] : null;
   const ownBand = bandOf(st.own.freq);
   const common = { selected: selSet(), strong: st.thresholds.strong_rssi_dbm };
-  for (const [band, el, hgt, ml] of [["6", "chart6", 300, 14], ["5", "chart5", 150, 5], ["2.4", "chart24", 150, 4]]) {
+  const solo = ui.bandView !== "all";
+  for (let [band, el, hgt, ml] of [["6", "chart6", 300, 14], ["5", "chart5", 150, 5], ["2.4", "chart24", 150, 4]]) {
+    if (solo && band !== ui.bandView) continue; // 隠しているグラフは描かない
+    if (solo) { hgt = soloHeight(); ml = 24; }
     renderSpectrum($(el), band, {
       ...common, height: hgt, maxLabels: ml,
       // いない扱いの局はグラフに描かない（選んでいる局だけは薄く残す）。表では「いる局だけ」を外すと見える
@@ -1429,6 +1475,14 @@ function init() {
   for (const b of $("tabs").querySelectorAll("button")) b.addEventListener("click", () => setTab(b.dataset.tab));
   $("drawerClose").addEventListener("click", () => select(null));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("drawer").hidden) select(null); });
+  // 表示する帯域のキー（入力欄で打っているときは使わない）
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) return;
+    const v = { "0": "all", "6": "6", "5": "5", "2": "2.4" }[e.key];
+    if (v) setBandView(v);
+  });
+  buildViewbar();
+  applyBandView();
   let rt = null;
   addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => ui.state && render(ui.state), 150); });
   setTab(ui.tab);
