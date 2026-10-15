@@ -360,6 +360,7 @@ class Overrides:
         "own_width": None,
         "own_bssids": None,  # None＝config.json のまま
         "own_ssids": None,
+        "own_follow": True,  # 自APのchに自chを自動で合わせる
     }
 
     def __init__(self, path: str | os.PathLike[str]):
@@ -388,6 +389,7 @@ class Overrides:
             d["own_width"] = None
         if d.get("own_bssids") is not None:
             d["own_bssids"] = [b for b in d["own_bssids"] if isinstance(b, str) and MAC_RE.match(b)][:OWN_AP_MAX]
+        d["own_follow"] = bool(d.get("own_follow", True))
         if d.get("own_ssids") is not None:
             d["own_ssids"] = [x for x in d["own_ssids"] if valid_ssid(x)][:OWN_AP_MAX]
 

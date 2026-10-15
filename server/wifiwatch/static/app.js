@@ -491,6 +491,7 @@ function renderTop(st) {
     !r.configured ? "中継 未設定" : r.ok ? `中継 ${r.fg ? "アプリ表示中" : "接続"}` : "中継 届かない"));
   $("clock").textContent = tJST(st.now);
 
+  renderFollowBar(st);
   const sb = $("scanbar");
   if (st.manual && st.manual.state !== "done") {
     const m = st.manual;
@@ -500,6 +501,40 @@ function renderTop(st) {
       h("span", { text: "（この間、自chと巡回は止めています）" }));
     sb.hidden = false;
   } else sb.hidden = true;
+}
+
+/** 自chを自APに合わせたこと（30分）と、どれに合わせるか選ぶとき（自APが別々のchにいる）。 */
+function renderFollowBar(st) {
+  const bar = $("followbar");
+  const f = st.own.follow || {};
+  const key = JSON.stringify([f.pending && f.pending.key, f.last && f.last.at]);
+  if (bar.dataset.key === key) return; // ボタンがあるので、変わったときだけ作り直す
+  bar.dataset.key = key;
+  clear(bar);
+  if (f.pending) {
+    bar.className = "followbar warn";
+    bar.append(h("span", { text: "▲ 自APが別々のchにいます。どれに自chを合わせますか？" }));
+    for (const c of f.pending.choices) {
+      const names = c.stations.map((x) => x.ssid || x.bssid).join("、");
+      bar.append(h("button", { class: "btn", type: "button", text: `${c.label}・${c.width}MHz（${names}）に合わせる`, onclick: async () => {
+        try { await api("/api/own", { method: "POST", body: { channel: c.freq, width: c.width } }); toast(`自chを ${c.label}・${c.width}MHz にしました`); ui.bands = null; }
+        catch (e) { toast(e.message, true); }
+      } }));
+    }
+    bar.hidden = false;
+    return;
+  }
+  const last = f.last;
+  if (last && prefs.get("followDismissed", 0) !== last.at) {
+    bar.className = last.reserved ? "followbar" : "followbar warn";
+    bar.append(
+      h("span", { text: `${last.reserved ? "ℹ" : "▲"} ${tJST(last.at)} 自AP ${last.ap} が ${last.to_label} に移ったので、自chを ${last.from_label}・${last.from_width}MHz → ${last.to_label}・${last.to_width}MHz に合わせました` }),
+      last.reserved ? null : h("span", { class: "sub", text: `移った先は予約ch（${last.reserved_labels.join("、")}）ではありません` }),
+      h("button", { class: "x", type: "button", "aria-label": "閉じる", text: "×", onclick: () => { prefs.set("followDismissed", last.at); bar.hidden = true; } }));
+    bar.hidden = false;
+    return;
+  }
+  bar.hidden = true;
 }
 
 function blindSummary(st) {
@@ -1133,6 +1168,7 @@ function renderSettings() {
   el.append(
     h("h3", { text: "自チームのWi-Fi（AP）" }), buildOwnAp(),
     h("h3", { style: "margin-top:14px", text: "自分のch（再起動なしで変更）" }), h("div", { class: "toolbar" }, chSel, wSel, apply),
+    buildFollowToggle(),
     h("h3", { style: "margin-top:14px", text: "画面の明るさ" }), theme,
     h("h3", { style: "margin-top:14px", text: "チームと予約ch（config.json）" }), h("div", { id: "setTeams" }),
     h("h3", { style: "margin-top:14px", text: "通知と中継" }), h("div", { id: "setLinks" }),
@@ -1166,6 +1202,20 @@ async function renderModelBook() {
     h("p", { class: "sub", text: `覚え帳 ${b.entries.length}件・機種の表 ${b.rules}行（models.json）。局の詳細の「機種を覚える」で増やせます。` }),
     b.entries.length ? h("div", { class: "table-wrap" }, t) : null, h("div", { class: "toolbar" }, dl)].filter(Boolean));
 }
+function buildFollowToggle() {
+  const cb = h("input", { type: "checkbox", id: "followToggle" });
+  cb.checked = !!(ui.state && ui.state.own.follow && ui.state.own.follow.enabled);
+  cb.addEventListener("change", async () => {
+    try {
+      const r = await api("/api/own_follow", { method: "POST", body: { enabled: cb.checked } });
+      if (ui.state) ui.state.own.follow = r;
+      toast(cb.checked ? "自APのchに自動で合わせます" : "自動で合わせるのをやめました（自chは手で変えます）");
+    } catch (e) { toast(e.message, true); cb.checked = !cb.checked; }
+  });
+  return h("div", { class: "toolbar" }, h("label", { for: "followToggle" }, cb, " 自APのchに自動で合わせる"),
+    h("span", { class: "sub", text: "自チームのAPが別のchに移ったら、自chもそこに合わせて知らせます。手で自chを変えたあとは、自APが動いたときだけ合わせます。" }));
+}
+
 // ------------------------------------------------------------------ 自チームのAP（MACアドレスかSSIDで登録）
 const OWN_AP_MODE = {
   bssid: "MACアドレス（BSSID）で見分けています。登録したAPだけが自チームです。同じSSIDの別の局は「SSIDのなりすまし」の警報になります。",
@@ -1267,6 +1317,11 @@ async function pickOwnAp(x, by) {
     : await saveOwnAp(ap.bssids, [...ap.ssids, x.ssid], `SSID「${x.ssid}」を自チームにしました`);
   if (!ok) return;
   const own = ui.state.own;
+  if (own.follow && own.follow.enabled) {
+    // 自動で合わせる設定なら、聞かずに合わせる（数秒あとに自chが変わる）
+    if (x.freq !== own.freq || x.width !== own.width) toast(`自chは自APに自動で合わせます（${chLabel(x.freq)}・${x.width}MHz）`);
+    return;
+  }
   if (x.freq !== own.freq || x.width !== own.width) {
     const go = await confirmDialog("自chも合わせますか？", `この局は ${chLabel(x.freq)}・${x.width}MHz です（いまの自chは ${own.label}・${own.width}MHz）。自chを変えると、監視する範囲（自ブロック）と警報の基準が変わります。`, "合わせる");
     if (go) {

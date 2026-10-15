@@ -153,6 +153,12 @@ def create_app(ctl: Controller, port: int) -> FastAPI:
         d = await body(request)
         return ctl.tag(str(d.get("bssid", "")).lower(), d.get("team"), "desktop")
 
+    # 自APのchに自chを自動で合わせるか（デスクトップだけ）
+    @app.post("/api/own_follow")
+    async def own_follow(request: Request) -> Any:
+        d = await body(request)
+        return ctl.set_own_follow(d.get("enabled"), "desktop")
+
     # 自チームのAP：MACアドレス（BSSID）かSSIDで登録する（デスクトップだけ）
     @app.post("/api/own_ap")
     async def own_ap(request: Request) -> Any:

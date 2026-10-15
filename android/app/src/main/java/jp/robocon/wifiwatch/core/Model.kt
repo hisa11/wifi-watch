@@ -26,7 +26,12 @@ data class PcState(
     val channels: List<ChannelState>,
     /** PCの無線では受けられないch（6GHz非対応の無線など）。無い版のPCでは空 */
     val unreceivableFreqs: List<Int> = emptyList(),
+    /** 自chを自APに合わせた（30分だけ載る）。無ければ null */
+    val followed: Followed? = null,
+    /** 自APが別々のchにいて、どれに合わせるかPCの画面で選ぶ必要がある（ch・幅の文字）。無ければ空 */
+    val followPending: List<String> = emptyList(),
 ) {
+    data class Followed(val at: Long, val from: String, val to: String, val ap: String, val reserved: Boolean)
     data class Alert(val level: String, val type: String, val title: String, val message: String, val since: Long)
     data class Manual(val id: String, val state: String, val origin: String, val requestId: String?, val done: Int, val total: Int, val remainingS: Double)
     data class CommandStatus(val state: String, val at: Double, val type: String?, val error: String?, val message: String?, val record: String?, val delayS: Double?)
@@ -67,6 +72,10 @@ data class PcState(
                 excludedBands = bands.optJSONArray("excluded_bands").strings(),
                 excludedFreqs = bands.optJSONArray("excluded_freqs").ints(),
                 unreceivableFreqs = bands.optJSONArray("unreceivable").ints(),
+                followed = own.optJSONObject("followed")?.let {
+                    Followed(it.optLong("at"), it.optString("from"), it.optString("to"), it.optString("ap"), it.optBoolean("reserved", true))
+                },
+                followPending = own.optJSONArray("follow_pending").strings(),
                 commands = cmds.keys().asSequence().associateWith { k ->
                     val c = cmds.getJSONObject(k)
                     CommandStatus(c.optString("state"), c.optDouble("at", 0.0), c.optStringOrNull("type"), c.optStringOrNull("error"),

@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 LEVEL_JP = {"crit": "緊急", "warn": "警告", "info": "情報"}
 NTFY_TAGS = {"crit": ["rotating_light"], "warn": ["warning"], "resolved": ["white_check_mark"],
-             "heartbeat": ["green_circle"]}
+             "heartbeat": ["green_circle"], "info": ["information_source"]}
 BACKOFF_MAX_S = 60.0
 HEARTBEAT_TTL_S = 15 * 60
 BUZZ_BYTE = b"C"
@@ -159,6 +159,12 @@ class Notifier:
                                           {"content": content, "allowed_mentions": {"parse": []}})
             self.buzzer.beep()
         self.wake.set()
+
+    def notify_info(self, title: str, body: str, level: str = "info") -> None:
+        """警報ではないお知らせ（自chを自APに合わせた、など）。ntfyだけに送る。"""
+        now = self.clock.time()
+        prio = 4 if level == "warn" else 3
+        self._enqueue_ntfy(now, "info", level, title, f"{body}\n{jst_str(now)} JST", prio, NTFY_TAGS.get(level, []))
 
     def _enqueue_ntfy(self, now: float, kind: str, level: str | None, title: str, body: str, prio: int,
                       tags: list[str], expires_at: float | None = None) -> None:

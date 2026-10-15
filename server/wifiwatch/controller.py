@@ -19,6 +19,7 @@ from . import channels as ch
 from .analyzer.alerts import AlertEvent
 from .analyzer.occupancy import OccupancyContext, channel_rows, is_present, missed_visits, present_stations, suggestions
 from .classify import FP_RE
+from .follow import FollowDecision, OwnFollower
 from .clock import Clock, jst_str, utc_iso
 from .config import OWN_AP_MAX, Config, normalize_mac, valid_ssid
 from .logs import FileLogs, write_own
@@ -61,6 +62,10 @@ def _origin(o: str) -> str:
     return o
 
 
+# 自chを自APに合わせたことを、画面とアプリに出しておく時間
+FOLLOW_SHOW_S = 1800.0
+
+
 class Controller:
     def __init__(self, cfg: Config, mon: Monitor, store: Store, logs: FileLogs, clock: Clock,
                  notifier: Any = None):
@@ -87,6 +92,11 @@ class Controller:
         mon.engine.add_ticker(10.0, self._write_channels)
         if notifier is not None:
             mon.on_alert_event.append(notifier.handle_alert)
+        # 自APのchに自chを合わせる
+        self.follower = OwnFollower()
+        self.own_followed: dict[str, Any] | None = None
+        self.own_follow_pending: dict[str, Any] | None = None
+        mon.engine.add_ticker(2.0, self._follow_tick)
 
     # ------------------------------------------------------------ イベント
     def log_event(self, category: str, kind: str | None = None, level: str | None = None, key: str | None = None,
@@ -257,8 +267,8 @@ class Controller:
             self.log_event("mode", "set", "info", None, "モードの切替", f"{before} → {mode}", origin)
         return {"mode": mode}
 
-    def set_own(self, freq: Any, width: Any, origin: str = "desktop") -> dict[str, Any]:
-        if origin != "desktop":
+    def set_own(self, freq: Any, width: Any, origin: str = "desktop", why: str | None = None) -> dict[str, Any]:
+        if origin not in ("desktop", "auto"):
             raise ControlError(403, "desktop_only", "自chの変更はデスクトップの画面だけです")
         try:
             f = ch.parse_channel_ref(freq)
@@ -274,9 +284,71 @@ class Controller:
         self.mon.detector.set_own(f, width)
         self.mon.overrides.update(own_channel=f, own_width=width,
                                   excluded_freqs=sorted(s.excluded_freqs))
-        self.log_event("own", "set", "info", None, "自chの変更",
-                       f"{ch.label(before[0])} {before[1]}MHz → {ch.label(f)} {width}MHz", origin)
+        self.log_event("own", "set" if origin == "desktop" else "follow", "info", None,
+                       "自chの変更" if origin == "desktop" else "自chを自APに合わせた",
+                       f"{ch.label(before[0])} {before[1]}MHz → {ch.label(f)} {width}MHz" + (f"（{why}）" if why else ""), origin)
+        if origin == "desktop":
+            self.follower.hold_current(self.mon.analyzer)  # 手で決めた自chを、自APが動くまで自動で変えない
+            self.own_follow_pending = None
         return {"own": f, "width": width, "block": s.block.label}
+
+    # ------------------------------------------------------------ 自APのchに自chを合わせる（follow.py）
+    def set_own_follow(self, enabled: Any, origin: str = "desktop") -> dict[str, Any]:
+        if origin != "desktop":
+            raise ControlError(403, "desktop_only", "自動で合わせるかどうかはデスクトップの画面だけで変えられます")
+        if not isinstance(enabled, bool):
+            raise ControlError(400, "bad_value", "enabled は true か false です")
+        self.mon.overrides.update(own_follow=enabled)
+        if not enabled:
+            self.own_follow_pending = None
+        self.log_event("own", "follow_setting", "info", None, "自APのchに自動で合わせる", "オン" if enabled else "オフ", origin)
+        return self.follow_info()
+
+    def follow_info(self) -> dict[str, Any]:
+        last = self.own_followed
+        recent = last if last and self.clock.time() - last["at"] < FOLLOW_SHOW_S else None
+        return {"enabled": bool(self.mon.overrides.get("own_follow")), "last": recent, "pending": self.own_follow_pending}
+
+    def _follow_tick(self, now: float) -> None:
+        if not self.mon.overrides.get("own_follow"):
+            return
+        mon = self.mon
+        d: FollowDecision | None = self.follower.check(mon.analyzer, mon.scheduler, self.cfg.own.width, now)
+        if d is None:
+            self.own_follow_pending = None
+            return
+        if d.action == "ambiguous":
+            key = [(c["freq"], c["width"]) for c in d.choices]
+            if self.own_follow_pending is None or self.own_follow_pending["key"] != key:
+                self.own_follow_pending = {"key": key, "choices": d.choices, "since": self.clock.time()}
+                text = "、".join(f"{c['label']}・{c['width']}MHz（{'、'.join(s['ssid'] or s['bssid'] for s in c['stations'])}）"
+                                for c in d.choices)
+                self.log_event("own", "follow_ambiguous", "warn", None, "自APが別々のchにいます",
+                               f"{text}。どれに自chを合わせるか、PCの画面で選んでください", "auto")
+                if self.notifier:
+                    self.notifier.notify_info("自APが別々のchにいます",
+                                              f"{text}\nどれに自chを合わせるか、PCの画面で選んでください", "warn")
+            return
+        assert d.freq is not None and d.width is not None
+        before = (self.cfg.own.channel, self.cfg.own.width)
+        st = d.stations[0]
+        name = st["ssid"] or st["bssid"]
+        reserved = d.freq in self.mon.own_reserved
+        why = f"自AP {name} が {ch.label(d.freq)} に移った" + ("" if reserved else "・予約外のch")
+        self.set_own(d.freq, d.width, "auto", why)
+        self.follower.last_change_mono = now
+        self.own_follow_pending = None
+        self.own_followed = {"at": self.clock.time(), "from": before[0], "from_label": ch.label(before[0]),
+                             "from_width": before[1], "to": d.freq, "to_label": ch.label(d.freq), "to_width": d.width,
+                             "ap": name, "bssid": st["bssid"], "reserved": reserved,
+                             "reserved_labels": [ch.label(f) for f in sorted(self.mon.own_reserved)]}
+        if self.notifier:
+            title = "自chを自APに合わせました" + ("" if reserved else "（予約外のch）")
+            body = (f"自AP {name} が {ch.label(d.freq)}・{d.width}MHz に移ったので、自chを "
+                    f"{ch.label(before[0])}・{before[1]}MHz から合わせました。")
+            if not reserved:
+                body += f"\n移った先は自チームの予約ch（{'、'.join(self.own_followed['reserved_labels'])}）ではありません。"
+            self.notifier.notify_info(title, body, "info" if reserved else "warn")
 
     def tag(self, bssid: Any, team: Any, origin: str = "desktop") -> dict[str, Any]:
         if not isinstance(bssid, str) or not BSSID_RE.match(bssid):
@@ -550,6 +622,8 @@ class Controller:
                 "retry": next((x["retry"] for x in reversed(series) if x["retry"] is not None), None),
                 "bssids": list(self.cfg.own.bssids),
                 "ap": self.own_ap(),
+                "follow": self.follow_info(),
+                "reserved": [{"freq": f, "label": ch.label(f)} for f in sorted(self.mon.own_reserved)],
             },
             "rx": mon.liveness.status(),
             "alerts": alerts, "alert_counts": counts,
@@ -603,6 +677,13 @@ class Controller:
             "commands": cmds,
             "channels": chans,
         }
+        fi = self.follow_info()
+        if fi["last"]:  # 自chを自APに合わせた（アプリで知らせる）。あるときだけ付ける
+            last = fi["last"]
+            out["own"]["followed"] = {"at": round(last["at"]), "from": last["from_label"], "to": last["to_label"],
+                                      "ap": last["ap"][:32], "reserved": last["reserved"]}
+        if fi["pending"]:
+            out["own"]["follow_pending"] = [f"{c['label']}・{c['width']}MHz" for c in fi["pending"]["choices"]][:4]
         unrx = list(getattr(mon.radio, "unreceivable", None) or [])
         if unrx:  # この無線では受けられないch（6GHz非対応の無線など）。アプリで「見ていない」の理由に出す
             out["bands"]["unreceivable"] = unrx

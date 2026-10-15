@@ -168,6 +168,12 @@ body.stale .layout { opacity: 0.6; }
 .scanbar .bar { flex: 1; max-width: 420px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.3); overflow: hidden; }
 .scanbar .bar > i { display: block; height: 100%; background: #fff; }
 
+/* 自chを自APに合わせた／どれに合わせるか選ぶ */
+.followbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 6px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-weight: 600; }
+.followbar.warn { background: var(--warn-bg); }
+.followbar .sub { font-weight: 400; color: var(--ink-2); }
+.followbar .x { margin-left: auto; border: 0; background: transparent; color: var(--ink-2); font-size: 16px; cursor: pointer; }
+
 /* ------------------------------------------------------------ 並び */
 .layout {
   display: grid; gap: 12px; padding: 12px 16px 24px;

@@ -44,6 +44,19 @@ class VerdictTest {
     }
 
     @Test
+    fun followNoticeIsReadFromStateCopy() {
+        val o = JSONObject(TestData.text("relay/pc_state.json"))
+        assertEquals(null, PcState.parse(o).followed) // ふだんは付いていない
+        o.getJSONObject("own").put("followed", JSONObject().put("at", 1792056347).put("from", "6GHz ch37")
+            .put("to", "6GHz ch21").put("ap", "hinji-great-hinji").put("reserved", false))
+            .put("follow_pending", org.json.JSONArray().put("6GHz ch21・20MHz").put("6GHz ch53・20MHz"))
+        val s = PcState.parse(o)
+        assertEquals("6GHz ch21", s.followed?.to)
+        assertEquals(false, s.followed?.reserved)
+        assertEquals(listOf("6GHz ch21・20MHz", "6GHz ch53・20MHz"), s.followPending)
+    }
+
+    @Test
     fun walkRecordHasSampleShape() {
         val sample = JSONObject(TestData.text("relay/app_walk.json")).getJSONObject("record")
         val ies = Ies.unhex(sample.getJSONArray("stations").getJSONObject(0).getString("ies_hex"))

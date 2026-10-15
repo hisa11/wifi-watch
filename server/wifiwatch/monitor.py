@@ -55,6 +55,8 @@ class Monitor:
             cfg.own.channel = ov["own_channel"]
             if ov.get("own_width") in ch.valid_widths(cfg.own.channel):
                 cfg.own.width = ov["own_width"]
+        # 自チームの予約ch（config.json の割当chと予備ch）。自chを自APに合わせて変えても、予約は変わらない
+        self.own_reserved = {cfg.own.channel, *cfg.own.spare}
         # 画面で登録した自チームのAP（MACアドレス・SSID）を、設定の値より優先する
         if ov.get("own_bssids") is not None:
             cfg.own.bssids = list(ov["own_bssids"])

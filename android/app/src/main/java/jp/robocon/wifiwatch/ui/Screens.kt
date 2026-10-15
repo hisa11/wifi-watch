@@ -92,12 +92,32 @@ fun StatusScreen(vm: MainViewModel) {
             fontSize = 12.sp, color = if (live.error != null) w.crit else w.ink2, modifier = Modifier.padding(top = 6.dp),
         )
         if (s == null) return@Screen
+        FollowNotice(s)
         val stale = age != null && age > STALE_MS
         if (stale) Text("以下は${ago(age!! / 1000.0)}の状態です（いまの様子ではありません）", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             color = w.ink, modifier = Modifier.padding(top = 8.dp))
         // 古い状態は薄く出す（見間違えないように）
         Column(Modifier.alpha(if (stale) 0.45f else 1f)) { StatusBody(s) }
     }
+}
+
+/** 自chを自APに合わせた（PCが自動で）／自APが別々のchにいる（PCの画面で選ぶ）。 */
+@Composable
+private fun FollowNotice(s: PcState) {
+    val w = LocalW.current
+    val text = when {
+        s.followPending.isNotEmpty() -> "▲ 自APが別々のchにいます（${s.followPending.joinToString("、")}）。どれに自chを合わせるか、PCの画面で選んでください"
+        s.followed != null -> {
+            val f = s.followed
+            "${if (f.reserved) "ℹ" else "▲"} ${jstOf(f.at.toDouble())} 自AP ${f.ap} が ${f.to} に移ったので、PCが自chを ${f.from} → ${f.to} に合わせました" +
+                if (f.reserved) "" else "（予約外のch）"
+        }
+        else -> return
+    }
+    val warn = s.followPending.isNotEmpty() || s.followed?.reserved == false
+    Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = w.ink,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            .background(if (warn) w.warn.copy(alpha = 0.18f) else w.surface2, RoundedCornerShape(8.dp)).padding(8.dp))
 }
 
 @Composable
