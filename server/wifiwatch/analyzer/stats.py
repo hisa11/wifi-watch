@@ -64,7 +64,8 @@ class ChannelStats:
         with self.lock:
             b = self._bucket(key, t_end)
             b.receive_s += receive_s
-            self.last_observed[key[0]] = t_end
+            if receive_s > 0:  # 受信していた時間が0の枠（その無線では受けられないchなど）は「見た」にしない
+                self.last_observed[key[0]] = t_end
             self.observed_total[key[0]] = self.observed_total.get(key[0], 0.0) + receive_s
             return b
 

@@ -33,6 +33,19 @@ def test_state_copy_shape_matches_sample(tmp_path):
     app.store.close()
 
 
+def test_unreceivable_channels_reach_state_copy(tmp_path):
+    # PCの無線が6GHz非対応（開発PCでスキャンだけのモード）なら、受けられないchを状態の写しに添える
+    app = make(tmp_path)
+    assert "unreceivable" not in app.controller.compact_state()["bands"]  # ふだん（AX210）は付けない
+    six = [f for f in range(5955, 6416, 20)]
+    app.monitor.radio.unreceivable = six
+    st = app.controller.compact_state()
+    assert st["bands"]["unreceivable"] == six
+    assert app.controller.state()["radio"]["unreceivable"] == six
+    assert len(json.dumps(st, ensure_ascii=False).encode()) <= 8 * 1024
+    app.store.close()
+
+
 def test_samples_from_app_are_accepted(tmp_path):
     app = make(tmp_path)
     walk = load_testdata("relay/app_walk.json")

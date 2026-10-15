@@ -1,6 +1,9 @@
 """合否ゲートが不合格のときの代わり：管理モードのパッシブスキャン（仕様書「起動前の確認」）。
 
 `iw dev <if> scan passive` で探し、nl80211 から生のIEを受け取って、解析部にはビーコンとして渡す。
+パッシブスキャンが失敗しても、能動スキャン（プローブ要求を送る）には切り替えない（受信専用）。
+この無線が受けられないch（`iw phy` で disabled か、一覧に無いもの。例：6GHz非対応の無線の6GHz）は、
+受信していた時間を0として返す（「検知なし」ではなく「見ていない」になるように）。
 動くのはビーコンから分かる機能（局の一覧、占有表示、帯域幅、割当違反、署名による検知）だけ。
 活動量・リトライ率・deauth・160MHz受信は使えない（データフレームが無い）。
 6GHzはPSCと、2.4/5GHzのRNRで知ったchに限られる可能性がある（推測）。
@@ -10,10 +13,11 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from .. import channels as ch
 from ..capture import build
 from ..clock import Clock, RealClock
 from .base import FrameBatch, RadioError, RegInfo, SurveyEntry, Tuning, validate_ifname
-from .linux import LinuxRadio, Runner, subprocess_runner
+from .linux import LinuxRadio, Runner, parse_phy_freqs, subprocess_runner
 from .nl80211 import Nl80211, ScanBss
 
 log = logging.getLogger(__name__)
@@ -36,22 +40,50 @@ class ScanOnlyRadio(LinuxRadio):
         self.generation = 0
         self.delivered: set[tuple[int, str]] = set()
         self.last_scan_ok = False
+        self.receivable: set[int] | None = None  # None＝分からない（すべて受けられるとみなす）
+        self.receivable_at = -1e18
+        try:
+            self._load_receivable()
+        except Exception as e:  # 起動は止めない（あとのスキャンで読み直す）
+            log.warning("この無線が受けられるchを読めません：%s", e)
+
+    @property
+    def unreceivable(self) -> list[int]:
+        """この無線では受けられないch（画面で「見ていない」の理由として出す）。"""
+        if self.receivable is None:
+            return []
+        return [f for f in ch.ALL_FREQS if f not in self.receivable]
 
     def _nl_dump(self, ifname: str) -> list[ScanBss]:
         if self._nl is None:
             self._nl = Nl80211()
         return self._nl.scan_dump(ifname)
 
+    def _load_receivable(self) -> None:
+        """この無線が受けられるch（`iw phy <phy> info` で disabled でないもの）。国情報で変わるので時々読み直す。"""
+        self.receivable_at = self.clock.monotonic()
+        phy = self.phy()
+        if not phy or not phy.startswith("phy") or not phy[3:].isdigit():
+            return
+        r = self._cmd(["iw", "phy", phy, "info"], 5.0, check=False)
+        freqs = parse_phy_freqs(r.out) if r.rc == 0 else {}
+        if freqs:
+            self.receivable = {f for f, ok in freqs.items() if ok}
+
     def _refresh(self) -> None:
+        if self.clock.monotonic() - self.receivable_at > 60:
+            self._load_receivable()
+        # パッシブだけ。失敗（busy など）しても能動スキャンには切り替えない（送信しない）
         r = self._cmd(["iw", "dev", self.ifname, "scan", "passive"], 30.0, check=False)
-        if r.rc != 0:
-            r = self._cmd(["iw", "dev", self.ifname, "scan"], 30.0, check=False)
         self.last_scan_ok = r.rc == 0
+        if not self.last_scan_ok:
+            log.info("パッシブスキャンに失敗（%s）：前の結果を使い、少しあとでやり直します", (r.err or r.out).strip()[:120])
         try:
             self.cache = self.dump(self.ifname)
         except OSError as e:
             raise RadioError(f"スキャン結果を読めません：{e}") from None
-        self.cache_at = self.clock.monotonic()
+        # 失敗したときは早めにやり直す（20秒待たずに5秒で）
+        self.cache_at = self.clock.monotonic() - (0 if self.last_scan_ok else max(0.0, self.max_age_s - 5.0))
         self.generation += 1
         self.delivered = set()
 
@@ -63,10 +95,15 @@ class ScanOnlyRadio(LinuxRadio):
             raise RadioError("tuneしていません")
         if self.clock.monotonic() - self.cache_at > self.max_age_s:
             self._refresh()
+        want = self.tuning.freq
+        if self.receivable is not None and want not in self.receivable:
+            # この無線では受けられないch：時間は過ぎるが「受信していた秒」は0
+            self.clock.sleep(min(duration, 0.05))
+            t = self.clock.monotonic()
+            return FrameBatch(self.tuning, t, t, [])
         t0 = self.clock.monotonic()
         self.clock.sleep(min(duration, 0.05))
         frames = []
-        want = self.tuning.freq
         for b in self.cache:
             if b.freq != want or (self.generation, b.bssid) in self.delivered:
                 continue

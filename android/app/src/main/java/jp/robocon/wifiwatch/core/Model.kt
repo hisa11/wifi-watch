@@ -24,6 +24,8 @@ data class PcState(
     val excludedFreqs: List<Int>,
     val commands: Map<String, CommandStatus>,
     val channels: List<ChannelState>,
+    /** PCの無線では受けられないch（6GHz非対応の無線など）。無い版のPCでは空 */
+    val unreceivableFreqs: List<Int> = emptyList(),
 ) {
     data class Alert(val level: String, val type: String, val title: String, val message: String, val since: Long)
     data class Manual(val id: String, val state: String, val origin: String, val requestId: String?, val done: Int, val total: Int, val remainingS: Double)
@@ -64,6 +66,7 @@ data class PcState(
                 },
                 excludedBands = bands.optJSONArray("excluded_bands").strings(),
                 excludedFreqs = bands.optJSONArray("excluded_freqs").ints(),
+                unreceivableFreqs = bands.optJSONArray("unreceivable").ints(),
                 commands = cmds.keys().asSequence().associateWith { k ->
                     val c = cmds.getJSONObject(k)
                     CommandStatus(c.optString("state"), c.optDouble("at", 0.0), c.optStringOrNull("type"), c.optStringOrNull("error"),

@@ -56,6 +56,7 @@ const STATE_JP = {
 const BLIND = new Set(["excluded", "paused", "scan_target", "stopped", "unseen"]);
 const MODE_JP = { PRE: "PRE（下見）", LIVE: "LIVE", QUIET: "QUIET（山場）" };
 const BAND_JP = { "2.4": "2.4GHz", "5": "5GHz", "6": "6GHz" };
+const CHANNEL_COUNT = { "2.4": 13, "5": 20, "6": 24 };
 const RX_JP = { ok: "受信 正常", suspect: "受信 様子見", recovering: "受信 復旧中", failed: "受信停止" };
 
 const jstFmt = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
@@ -470,6 +471,12 @@ function renderTop(st) {
 function blindSummary(st) {
   const out = [];
   if (st.radio && st.radio.scan_only) out.push("活動量・リトライ率・deauth・160MHz受信（スキャンだけのモード）");
+  const unrx = (st.radio && st.radio.unreceivable) || [];
+  for (const b of ["6", "5", "2.4"]) {
+    const n = unrx.filter((f) => bandOf(f) === b).length;
+    if (!n) continue;
+    out.push(n === CHANNEL_COUNT[b] ? `${BAND_JP[b]}（この無線では受けられない）` : `${BAND_JP[b]}の${n}ch（この無線では受けられない）`);
+  }
   for (const b of st.excluded_bands) out.push(`${BAND_JP[b]}（巡回外）`);
   const ex = st.excluded_freqs.filter((f) => !st.excluded_bands.includes(bandOf(f)));
   if (ex.length) out.push(`${ex.length}ch（巡回外）`);

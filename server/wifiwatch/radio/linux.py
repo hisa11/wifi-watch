@@ -266,7 +266,18 @@ class LinuxRadio(Radio):
     def reset_monitor(self) -> None:
         self.set_monitor()
 
+    def driver(self) -> str | None:
+        """このIFのドライバの名前（/sys/class/net/<if>/device/driver の先）。"""
+        try:
+            return (self.sys_class_net / self.ifname / "device" / "driver").resolve(strict=True).name
+        except OSError:
+            return None
+
     def reload_driver(self) -> None:
+        # 読み込み直すのは iwlwifi（AX210）だけ。ほかのドライバのIF（開発PCの無線など）には触らない
+        drv = self.driver()
+        if drv != "iwlwifi":
+            raise RadioError(f"{self.ifname} のドライバは {drv or '不明'} のため、読み込み直しません（iwlwifi だけ）")
         self._close_sock()
         self._cmd(["modprobe", "-r", "iwlmvm", "iwlwifi"], 20.0)
         self._cmd(["modprobe", "iwlwifi"], 20.0)

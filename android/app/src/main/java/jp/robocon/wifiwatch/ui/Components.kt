@@ -81,6 +81,12 @@ fun blindList(s: PcState): List<String> {
     val ex = s.excludedFreqs.filter { Channels.bandOf(it) !in s.excludedBands }
     if (ex.size in 1..3) ex.forEach { out += "${Channels.label(it)}（巡回外）" }
     else if (ex.isNotEmpty()) out += "${ex.size}ch（巡回外）"
+    for (band in Channels.BANDS) {
+        val n = s.unreceivableFreqs.count { Channels.bandOf(it) == band }
+        if (n == 0) continue
+        out += if (n == Channels.freqs(band).size) "${Channels.BAND_LABEL[band]}（この無線では受けられない）"
+        else "${Channels.BAND_LABEL[band]}の${n}ch（この無線では受けられない）"
+    }
     if (s.rxState == "failed") out += "全帯域（受信停止）"
     return out
 }

@@ -72,3 +72,68 @@ def test_scan_only_feeds_beacons_to_analyzer(tmp_path):
     clk.advance(30)  # 古くなったらスキャンし直す
     r.tune(validate_tuning(F("6g37"), 160, 6185))
     assert len(r.capture(1.0).frames) == 1 and len(run.calls) == 2
+
+
+PHY_24_5 = """Wiphy phy0
+\tBand 1:
+\t\tFrequencies:
+\t\t\t* 2412.0 MHz [1] (20.0 dBm)
+\t\t\t* 2484.0 MHz [14] (disabled)
+\tBand 2:
+\t\tFrequencies:
+\t\t\t* 5180.0 MHz [36] (23.0 dBm)
+"""
+
+
+class RunPhy:
+    """iw phy の答えを返し、パッシブスキャンは busy で失敗させる。"""
+
+    def __init__(self, scan_rc=0):
+        self.calls = []
+        self.scan_rc = scan_rc
+
+    def __call__(self, argv, timeout):
+        self.calls.append(list(argv))
+        if argv[:2] == ["iw", "phy"]:
+            return RunResult(0, PHY_24_5, "")
+        if "scan" in argv:
+            return RunResult(self.scan_rc, "", "command failed: Device or resource busy (-16)")
+        return RunResult(0, "", "")
+
+
+def phy_sysnet(tmp_path):
+    d = tmp_path / "wlan0" / "phy80211"
+    d.mkdir(parents=True)
+    (d / "name").write_text("phy0\n")
+    return str(tmp_path)
+
+
+def test_scan_only_never_falls_back_to_active_scan(tmp_path):
+    clk = FakeClock()
+    run = RunPhy(scan_rc=240)
+    r = ScanOnlyRadio("wlan0", clk, runner=run, dump=lambda ifn: [], sys_class_net=phy_sysnet(tmp_path))
+    r.tune(validate_tuning(F("5g36"), 20, F("5g36")))
+    r.capture(0.25)
+    scans = [c for c in run.calls if "scan" in c]
+    assert scans == [["iw", "dev", "wlan0", "scan", "passive"]]  # 受信専用：能動スキャン（プローブ要求）に切り替えない
+    clk.advance(6)  # 失敗したときは5秒ほどでやり直す（それでもパッシブだけ）
+    r.capture(0.25)
+    assert [c for c in run.calls if "scan" in c] == [["iw", "dev", "wlan0", "scan", "passive"]] * 2
+
+
+def test_scan_only_unreceivable_channels_are_not_observed(tmp_path):
+    # 6GHz非対応の無線：6GHzのchは「受信していた秒」を0にして、検知なしと見ていないを混ぜない
+    clk = FakeClock()
+    dump = [ScanBss("02:00:00:00:00:02", 5180, -60.0, build.ap_ies(F("5g36"), 20, "S5"), 100)]
+    r = ScanOnlyRadio("wlan0", clk, runner=RunPhy(), dump=lambda ifn: dump, sys_class_net=phy_sysnet(tmp_path))
+    a = Analyzer(clk)
+    r.tune(validate_tuning(F("5g36"), 20, F("5g36")))
+    b = r.capture(0.25)
+    assert b.receive_s > 0 and len(b.frames) == 1
+    a.process_batch(b)
+    r.tune(validate_tuning(F("6g37"), 20, F("6g37")))
+    b6 = r.capture(1.0)
+    assert b6.receive_s == 0 and b6.frames == []
+    a.process_batch(b6)
+    assert F("6g37") not in a.stats.last_observed and F("5g36") in a.stats.last_observed
+    assert r.receivable == {2412, 5180}  # disabled のchは受けられないものとして扱う

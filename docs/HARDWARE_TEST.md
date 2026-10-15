@@ -17,6 +17,33 @@ cd ~/wifi-watch && deploy/setup.sh wlan0      # IF名は ip -br link で確か�
 `hwprobe` を使う間は、本体の受信と取り合わないよう止めておく：`sudo pm2 stop wifiwatch-radiod wifiwatch`（終わったら `sudo pm2 start all`）。
 `hwprobe` はモニタモードのIFに対して使う（合否ゲートのあとはモニタモードのまま）。
 
+## 0'. 開発PC（6GHz非対応の無線）で、本物の2.4/5GHzを見る
+
+本番と同じコードの「スキャンだけのモード」（radiod `--scan-only`）を、開発PCの無線（例：RTL8852BE、IF名 wlo1）で動かす。
+Wi-Fiは切れない（モニタモードにしない・IFを落とさない・ドライバを読み込み直さない）。スキャンはパッシブだけ（送信しない）。
+6GHzは「見ていない（この無線では受けられない）」と出る。活動量・リトライ率・deauth・160MHz受信も、このモードでは見ていない。
+パッシブスキャン（約20秒ごと）の数秒間は、このPCのWi-Fiの通信が少し遅くなることがある。
+
+```bash
+sudo apt install iw
+```
+
+端末1（root の補助。Ctrl-Cで止める）：
+
+```bash
+cd ~/wifi-watch/server && sudo .venv/bin/python -m wifiwatch.radio.radiod --interface wlo1 --scan-only --group $(id -gn) --allow-uid $(id -u)
+```
+
+端末2（本体。普通のユーザー）：
+
+```bash
+cd ~/wifi-watch/server && .venv/bin/python -m wifiwatch --config ../data/devpc/config.json
+```
+
+`data/devpc/config.json`（gitの外）は `config.example.json` の interface を wlo1、radio を `{"kind": "radiod"}` にしたもの。画面は http://127.0.0.1:8080 。
+巡回を速くしたいときは、画面でモードを PRE（下見）にする（LIVEは時間の大半を自ブロックの6GHzに使うため）。
+`deploy/gate.sh` と `deploy/setup.sh` は開発PCでは使わない（モニタモードに切り替えてWi-Fiが切れる）。
+
 ## 1. 合否ゲート：AX210を6GHzでモニタモードにできるか
 
 ```bash

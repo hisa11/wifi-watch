@@ -114,6 +114,11 @@
 - **指示が届くまでの秒** — PCがアプリの指示を受け取ったとき、中継が受け付けてからの秒（中継の時計どうし）をイベントに残す（実機の確認12のため）。
 - **NetworkManager** — `/etc/NetworkManager/conf.d/99-wifiwatch-unmanaged.conf` で監視のIFだけ管理外にする（`setup.sh` が確認してから書く）。
 
+- **スキャンだけのモードは能動スキャンに切り替えない（2026-10-15）** — パッシブスキャン（`iw scan passive`）が失敗（busy など）したとき、前は `iw scan`（プローブ要求を送る）でやり直していた。受信専用の約束に反するので、パッシブだけにし、失敗したら5秒ほどでやり直す。
+- **受けられないchは「見ていない」** — スキャンだけのモードで、無線が受けられないch（`iw phy <phy> info` で disabled か一覧に無いもの）は、受信していた秒を0として返す。解析部も、受信していた秒が0の枠ではそのchを「見た」にしない。radiod は受けられないchを hello で返し、画面とアプリの「見ていない」に「この無線では受けられない」と出す（状態の写しには、あるときだけ `bands.unreceivable` を付ける）。AX210で6GHzが無効になったときも同じ扱いになる。
+- **ドライバの読み込み直しは iwlwifi のIFだけ** — `/sys/class/net/<if>/device/driver` が iwlwifi でなければ断る（開発PCの無線のドライバに触らない、関係のないモジュールを読み込まない）。
+- **開発PCで本物を見る** — ユーザーの希望（2026-10-15）「本番とできるだけコードを変えずに」。本番の「スキャンだけのモード」をそのまま使い、別のモードは作らない。手順は `HARDWARE_TEST.md` の「0'」。
+
 ## アプリ（M8）
 
 - **2026-10-15 Androidの確かめ（SDKのソースと api-versions.xml）** — `ScanResult.getInformationElements()` と `ScanResult.InformationElement`（getId・getIdExt・getBytes）はAPI 30から。拡張IE（id=255）の中身は拡張IDを除いたもの。`getWifiStandard()` はAPI 30、`CHANNEL_WIDTH_320MHZ`・`WIFI_STANDARD_11BE`・`getWifiSsid()` はAPI 33。`WifiManager.startScan()` はAPI 28で非推奨（使える）。`getScanResults()` は ACCESS_FINE_LOCATION と ACCESS_WIFI_STATE が要り、位置情報サービスがオンであること。スキャンは前面で2分に4回まで（開発者オプションで解除できる。developer.android.com の Wi-Fi scanning）。`ConnectivityManager.requestNetwork(NetworkRequest, NetworkCallback)` は CHANGE_NETWORK_STATE が要り、unregister するまで続く。`Network.getSocketFactory()`・`Network.getAllByName()` はAPI 21から。Android はマルチBSSIDの非送信BSSも別の結果として返す（11ax以上）。

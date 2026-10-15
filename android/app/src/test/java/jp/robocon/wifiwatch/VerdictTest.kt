@@ -36,6 +36,9 @@ class VerdictTest {
         val v = verdictOf(live(none, 1000))
         assertEquals("検知なし", v.title)
         assertTrue(v.sub.contains("2.4GHz（巡回外）")) // 見ていないところを添える
+        // PCの無線が6GHz非対応なら、6GHzは「見ていない」の理由として添える
+        val no6 = none.copy(excludedBands = emptyList(), unreceivableFreqs = Channels.freqs(Channels.B6))
+        assertTrue(verdictOf(live(no6, 1000)).sub.contains("6GHz（この無線では受けられない）"))
         assertEquals("PCの状態がまだありません", verdictOf(live(null, null)).title)
         assertEquals("受信停止", verdictOf(live(base.copy(rxState = "failed"), 1000)).title)
     }

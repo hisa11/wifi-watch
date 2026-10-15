@@ -132,7 +132,8 @@ class RadioServer:
         r = self.radio
         if op == "hello":
             return T_RESP, json.dumps({"ok": True, "result": {"pid": os.getpid(),
-                                                                "scan_only": bool(getattr(r, "scan_only", False))}}).encode()
+                                                                "scan_only": bool(getattr(r, "scan_only", False)),
+                                                                "unreceivable": list(getattr(r, "unreceivable", []))}}).encode()
         if op == "tune":
             t = validate_tuning(args.get("freq"), args.get("width"), args.get("center"))
             r.tune(t)

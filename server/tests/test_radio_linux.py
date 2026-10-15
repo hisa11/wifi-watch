@@ -67,6 +67,11 @@ def sysnet(tmp_path):
     d = tmp_path / "net" / "wlan0" / "phy80211"
     d.mkdir(parents=True)
     (d / "name").write_text("phy0\n")
+    drv = tmp_path / "drivers" / "iwlwifi"
+    drv.mkdir(parents=True)
+    dev = tmp_path / "net" / "wlan0" / "device"
+    dev.mkdir()
+    (dev / "driver").symlink_to(drv)
     return tmp_path / "net"
 
 
@@ -124,6 +129,20 @@ def test_monitor_and_recovery_commands(sysnet):
     run.calls.clear()
     r.reload_driver()
     assert run.calls == [["modprobe", "-r", "iwlmvm", "iwlwifi"], ["modprobe", "iwlwifi"]]
+
+
+def test_reload_driver_only_for_iwlwifi(sysnet, tmp_path):
+    # 開発PCの無線（rtw89など）のIFでは、読み込み直さない（ほかのドライバに触らない）
+    other = tmp_path / "drivers" / "rtw89_8852be"
+    other.mkdir(parents=True)
+    link = sysnet / "wlan0" / "device" / "driver"
+    link.unlink()
+    link.symlink_to(other)
+    run = FakeRunner()
+    r, _ = make_linux(run, sysnet)
+    with pytest.raises(RadioError, match="rtw89_8852be"):
+        r.reload_driver()
+    assert run.calls == []
 
 
 def test_regulatory_parsing(sysnet):
@@ -188,6 +207,10 @@ def test_remote_radio_round_trip(radiod):
     rr.reset_monitor()
     rr.reload_driver()
     assert fake.calls[-4:] == ["managed_scan", "set_monitor", "reset_monitor", "reload_driver"]
+    assert rr.unreceivable == []  # 偽の無線はすべて受けられる
+    fake.unreceivable = list(ch.FREQS_BY_BAND[ch.BAND_6])  # 6GHz非対応の無線のつもり
+    rr.hello()
+    assert rr.unreceivable == list(ch.FREQS_BY_BAND[ch.BAND_6])
     rr.close()
 
 

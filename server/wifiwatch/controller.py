@@ -485,7 +485,8 @@ class Controller:
             "thresholds": {"strong_rssi_dbm": self.cfg.thresholds.strong_rssi_dbm,
                            "problem_min": self.cfg.thresholds.problem_channel_min_strong},
             "counters": dict(mon.analyzer.counters),
-            "radio": {"kind": self.cfg.radio.kind, "scan_only": bool(getattr(mon.radio, "scan_only", False))},
+            "radio": {"kind": self.cfg.radio.kind, "scan_only": bool(getattr(mon.radio, "scan_only", False)),
+                      "unreceivable": list(getattr(mon.radio, "unreceivable", None) or [])},
             "clients": sum(1 for c in list(mon.analyzer.table.clients.values()) if now - c.last_seen < 900),
         }
 
@@ -521,6 +522,9 @@ class Controller:
             "commands": cmds,
             "channels": chans,
         }
+        unrx = list(getattr(mon.radio, "unreceivable", None) or [])
+        if unrx:  # この無線では受けられないch（6GHz非対応の無線など）。アプリで「見ていない」の理由に出す
+            out["bands"]["unreceivable"] = unrx
         if out["manual"]:
             out["manual"] = {k: out["manual"][k] for k in ("id", "state", "origin", "request_id", "done", "total", "remaining_s")}
         size = len(json.dumps(out, ensure_ascii=False).encode("utf-8"))

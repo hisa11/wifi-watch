@@ -18,6 +18,8 @@ class RemoteRadio(Radio):
         self.timeout = timeout
         self.sock: socket.socket | None = None
         self.lock = threading.Lock()
+        self.unreceivable: list[int] = []
+        self.hello_at: float | None = None
 
     def _connect(self) -> socket.socket:
         if self.sock is None:
@@ -56,9 +58,14 @@ class RemoteRadio(Radio):
     def hello(self) -> dict[str, Any]:
         r = self._json("hello")
         self.scan_only = bool(r.get("scan_only"))
+        self.unreceivable = [int(f) for f in r.get("unreceivable") or []]
+        self.hello_at = self.clock.monotonic()
         return r
 
     def tune(self, tuning: Tuning) -> None:
+        # radiod があとから起動したときや、受けられるchが変わったとき（国情報）のために、ときどき聞き直す
+        if self.hello_at is None or self.clock.monotonic() - self.hello_at > 60:
+            self.hello()
         self._json("tune", freq=tuning.freq, width=tuning.width, center=tuning.center)
 
     def capture(self, duration: float) -> FrameBatch:
