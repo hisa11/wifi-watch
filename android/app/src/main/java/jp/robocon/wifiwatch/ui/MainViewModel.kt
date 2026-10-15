@@ -39,27 +39,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     data class Live(
         val state: PcState? = null,
         val stateAgeMs: Long? = null,
+        /** stateAgeMs を受け取った時刻（端末の起動からの経過） */
+        val stateAtElapsed: Long = 0,
         val relayNow: Long? = null,
-        val polledAtElapsed: Long = 0,
+        /** relayNow を受け取った時刻。指示を送った応答でも更新するので、状態の古さとは別に持つ */
+        val relayAtElapsed: Long = 0,
         val lastOkElapsed: Long? = null,
         val error: String? = null,
         val polling: Boolean = false,
+        /** 1秒ごとに変わる値（中継に届かない間も「◯秒前」と判定を進めるため） */
+        val tick: Long = 0,
     ) {
         /** 中継の今の時刻の見積もり（最後に受け取った now ＋ そこからの経過） */
-        fun relayNowEstimate(): Long? = relayNow?.let { it + (SystemClock.elapsedRealtime() - polledAtElapsed) }
+        fun relayNowEstimate(): Long? = relayNow?.let { it + (SystemClock.elapsedRealtime() - relayAtElapsed) }
 
         /** 状態の写しの古さ（中継の時計どうしで比べた値に、受け取ってからの経過を足す） */
-        fun ageMsNow(): Long? = stateAgeMs?.let { it + (SystemClock.elapsedRealtime() - polledAtElapsed) }
+        fun ageMsNow(): Long? = stateAgeMs?.let { it + (SystemClock.elapsedRealtime() - stateAtElapsed) }
     }
 
     private val _live = MutableStateFlow(Live())
     val live: StateFlow<Live> = _live
     private var pollJob: Job? = null
+    private var tickJob: Job? = null
 
     fun startPolling() {
         if (pollJob != null) return
         app.cellular.acquire() // 前面にいる間はモバイル回線を確保しておく
         _live.update { it.copy(polling = true) }
+        tickJob = viewModelScope.launch {
+            while (isActive) { delay(1000); _live.update { it.copy(tick = SystemClock.elapsedRealtime()) } }
+        }
         pollJob = viewModelScope.launch {
             var opened = true // 開いた直後は版数を上げてもらう（PCが10秒以内に気づいて2秒間隔に入る）
             while (isActive) {
@@ -68,7 +77,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val r = PollResult.parse(app.api.poll(opened))
                         opened = false
                         val now = SystemClock.elapsedRealtime()
-                        _live.update { it.copy(state = r.state ?: it.state, stateAgeMs = r.stateAgeMs, relayNow = r.now, polledAtElapsed = now, lastOkElapsed = now, error = null) }
+                        _live.update {
+                            it.copy(state = r.state ?: it.state, stateAgeMs = r.stateAgeMs ?: it.stateAgeMs, stateAtElapsed = if (r.stateAgeMs != null) now else it.stateAtElapsed,
+                                relayNow = r.now, relayAtElapsed = now, lastOkElapsed = now, error = null)
+                        }
                     } catch (e: Exception) {
                         _live.update { it.copy(error = describe(e)) }
                     }
@@ -83,6 +95,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopPolling() {
         pollJob?.cancel()
         pollJob = null
+        tickJob?.cancel()
+        tickJob = null
         app.cellular.release()
         _live.update { it.copy(polling = false) }
     }
@@ -125,7 +139,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     val r = app.api.command(body)
                     update(c.requestId) { it.copy(acceptedAt = r.optLong("accepted_at"), busy = false, error = null) }
-                    _live.update { it.copy(relayNow = r.optLong("now"), polledAtElapsed = SystemClock.elapsedRealtime()) }
+                    _live.update { it.copy(relayNow = r.optLong("now"), relayAtElapsed = SystemClock.elapsedRealtime()) }
                     return@launch
                 } catch (e: RelayException) {
                     last = if (e.code == "busy") "PCがまだ受け取っていない手動スキャンがあります" else e.message
@@ -200,12 +214,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun watchRecord(id: String) = app.db.records().watch(id)
+
     suspend fun openRecord(id: String): RecordEntity? {
         val cur = app.db.records().get(id)
         if (cur?.bodyJson != null) return cur
         return try {
             val body = app.api.record(id)
-            val e = (cur ?: RecordEntity(id, body.optString("kind"), body.optDouble("created_at"), JSONObject().put("id", id).toString(), null, 0))
+            // まだ一覧を読んでいない記録（スキャンの完了から開いたとき）は、本体に付いてくる一覧用の情報を使う
+            val meta = body.optJSONObject("meta")
+            val e = (cur ?: RecordEntity(id, body.optString("kind"), body.optDouble("created_at"),
+                (meta ?: JSONObject().put("id", id)).toString(), null, meta?.optLong("updated_at") ?: 0))
                 .copy(bodyJson = body.toString())
             app.db.records().put(e)
             e

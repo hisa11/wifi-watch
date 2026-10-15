@@ -112,13 +112,13 @@ Wi-Fiは局・ch・時間で膨大になりやすい。デスクトップの画�
 
 ## M8 アプリ
 
-- [ ] Androidの現行ドキュメントを確かめる（Wi-Fiスキャンの権限と制限、ScanResultのIE、requestNetwork、WorkManager）
-- [ ] Gradleの雛形、Compose、Room、WorkManager、minSdk 30
-- [ ] モバイル回線への固定（ソケットと名前解決）
-- [ ] 6画面（状態、手動スキャン、帯域ON/OFF、記録、歩測、設定）
-- [ ] IE解析を `testdata/` でPC側と照合
-- [ ] 溜めと再送（要求ID）
-- [ ] 実機での確かめ方を `HARDWARE_TEST.md` に
+- [x] Androidの現行ドキュメントを確かめる（Wi-Fiスキャンの権限と制限、ScanResultのIE、requestNetwork、WorkManager）
+- [x] Gradleの雛形、Compose、Room、WorkManager、minSdk 30
+- [x] モバイル回線への固定（ソケットと名前解決）
+- [x] 6画面（状態、手動スキャン、帯域ON/OFF、記録、歩測、設定）
+- [x] IE解析を `testdata/` でPC側と照合
+- [x] 溜めと再送（要求ID）
+- [x] 実機での確かめ方を `HARDWARE_TEST.md` に
 
 ## M9 通し
 

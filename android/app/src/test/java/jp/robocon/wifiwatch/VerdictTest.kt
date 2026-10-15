@@ -14,13 +14,17 @@ import org.junit.Test
 class VerdictTest {
     private val base = PcState.parse(JSONObject(TestData.text("relay/pc_state.json")))
 
-    private fun live(s: PcState?, ageMs: Long?) = MainViewModel.Live(state = s, stateAgeMs = ageMs, relayNow = 0, polledAtElapsed = 0)
+    private fun live(s: PcState?, ageMs: Long?) = MainViewModel.Live(state = s, stateAgeMs = ageMs, relayNow = 0, stateAtElapsed = 0, relayAtElapsed = 0)
 
     @Test
     fun staleStateIsNotNoDetection() {
         val v = verdictOf(live(base.copy(alerts = emptyList(), warn = 0, crit = 0), 45_000))
         assertEquals("PCから応答なし", v.title) // 古い状態を「検知なし」と出さない
         assertEquals("blind", v.level)
+        // 端末が中継に届かないときは、PCのせいにしない
+        val off = verdictOf(live(base, 45_000).copy(error = "モバイル回線が使えません"))
+        assertEquals("中継に届かない", off.title)
+        assertEquals("blind", off.level)
     }
 
     @Test

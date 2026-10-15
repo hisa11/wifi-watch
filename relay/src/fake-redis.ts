@@ -26,6 +26,23 @@ export class FakeRedis implements RedisLike {
     this.usage = { commands: 0, bytes: 0, byCommand: {} };
   }
 
+  /** 中身をJSONにする（ローカルの中継を止めて戻す確認用。Upstashは止まっても中身が残るので、それに合わせる） */
+  dump(): string {
+    const out: [string, Entry["t"], unknown, number | undefined][] = [];
+    for (const [k, e] of this.data) out.push([k, e.t, e.t === "s" ? e.v : [...e.v.entries()], e.exp]);
+    return JSON.stringify(out);
+  }
+
+  load(text: string): void {
+    this.data.clear();
+    for (const [k, t, v, e] of JSON.parse(text) as [string, Entry["t"], unknown, number | null][]) {
+      const exp = e ?? undefined; // JSONでは「期限なし」が null になる
+      if (t === "s") this.data.set(k, { t, v: v as string, exp });
+      else if (t === "h") this.data.set(k, { t, v: new Map(v as [string, string][]), exp });
+      else this.data.set(k, { t, v: new Map(v as [string, number][]), exp });
+    }
+  }
+
   /** Redisが空に戻ったことにする（版数の比較が「違うか」で行われることのテスト用） */
   flushAll(): void {
     this.data.clear();

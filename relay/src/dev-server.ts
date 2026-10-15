@@ -1,6 +1,7 @@
 // ローカルの中継（開発とテスト用）。本番と同じ handle と、偽のRedisを使う。
 // vercel dev もVercelへのログインも要らない。127.0.0.1 にだけ bind する。
 //   APP_TOKEN=... PC_TOKEN=... node dist/src/dev-server.js [ポート]
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { FakeRedis } from "./fake-redis.js";
 import { handle } from "./routes.js";
@@ -51,8 +52,21 @@ if (isMain) {
     console.error("APP_TOKEN と PC_TOKEN を16文字以上で指定してください");
     process.exit(2);
   }
-  startDevServer({ port, appToken, pcToken }).then(({ port: p, redis }) => {
-    console.log(`ローカルの中継: http://127.0.0.1:${p}`);
+  // REDIS_STATE=ファイル を指定すると、偽のRedisの中身をそこに残す（止めて戻しても消えない＝Upstashと同じ）
+  const statePath = process.env.REDIS_STATE;
+  const redis = new FakeRedis();
+  if (statePath && existsSync(statePath)) redis.load(readFileSync(statePath, "utf-8"));
+  startDevServer({ port, appToken, pcToken, redis }).then(({ port: p }) => {
+    console.log(`ローカルの中継: http://127.0.0.1:${p}${statePath ? `（Redisの中身：${statePath}）` : ""}`);
+    if (statePath) {
+      let last = "";
+      const save = () => {
+        const text = redis.dump();
+        if (text !== last) { writeFileSync(statePath, text, { mode: 0o600 }); last = text; }
+      };
+      setInterval(save, 500).unref();
+      for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { save(); process.exit(0); });
+    }
     setInterval(() => {
       if (redis.usage.commands) console.log(`redis: ${redis.usage.commands} commands, ${redis.usage.bytes} bytes`);
     }, 60_000).unref();

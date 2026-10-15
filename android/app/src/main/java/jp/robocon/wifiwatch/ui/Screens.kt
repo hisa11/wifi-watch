@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -43,10 +43,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -57,6 +59,7 @@ import jp.robocon.wifiwatch.core.RecordMeta
 import jp.robocon.wifiwatch.core.StationRow
 import jp.robocon.wifiwatch.core.strings
 import jp.robocon.wifiwatch.data.RecordEntity
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -89,6 +92,18 @@ fun StatusScreen(vm: MainViewModel) {
             fontSize = 12.sp, color = if (live.error != null) w.crit else w.ink2, modifier = Modifier.padding(top = 6.dp),
         )
         if (s == null) return@Screen
+        val stale = age != null && age > STALE_MS
+        if (stale) Text("以下は${ago(age!! / 1000.0)}の状態です（いまの様子ではありません）", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = w.ink, modifier = Modifier.padding(top = 8.dp))
+        // 古い状態は薄く出す（見間違えないように）
+        Column(Modifier.alpha(if (stale) 0.45f else 1f)) { StatusBody(s) }
+    }
+}
+
+@Composable
+private fun StatusBody(s: PcState) {
+    val w = LocalW.current
+    Column {
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Fact("モード", s.mode)
@@ -98,14 +113,16 @@ fun StatusScreen(vm: MainViewModel) {
         Text("受信しているブロック：${s.blockLabel}${if (s.mode != "PRE") "・自chの受信率 ${(s.ownRatio * 100).toInt()}%" else ""}", fontSize = 12.sp, color = w.ink2)
         SectionTitle("chごとの様子（見ているか・強い局）")
         ChannelStrip(s)
+        // 警報が出ていても、見ていないところは警報より上に出す（「検知なし」と「見ていない」を混ぜない）
+        val blind = blindList(s)
+        if (blind.isNotEmpty()) {
+            Text("▨ 見ていない：" + blind.joinToString("、") + "。ここで起きたことは検知できません。",
+                color = w.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).background(w.surface3, RoundedCornerShape(8.dp)).padding(8.dp))
+        }
         SectionTitle("発生中の警報（${s.alerts.size}）")
         if (s.alerts.isEmpty()) Text("検知なし（ピットから見えた範囲で）", color = w.ink2)
         for (a in s.alerts) AlertRow(a)
-        val blind = blindList(s)
-        if (blind.isNotEmpty()) {
-            SectionTitle("見ていないところ")
-            Text(blind.joinToString("、") + "。ここで起きたことは検知できません。", color = w.ink2, fontSize = 13.sp)
-        }
     }
 }
 
@@ -136,7 +153,7 @@ private fun AlertRow(a: PcState.Alert) {
 
 // ================================================================== 2. 手動スキャン
 @Composable
-fun ScanScreen(vm: MainViewModel) {
+fun ScanScreen(vm: MainViewModel, onOpenRecord: (String) -> Unit = {}) {
     val live by vm.live.collectAsStateWithLifecycle()
     val cmds by vm.cmds.collectAsStateWithLifecycle()
     val w = LocalW.current
@@ -148,7 +165,7 @@ fun ScanScreen(vm: MainViewModel) {
         SectionTitle("スキャンする帯域")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (b in listOf("6", "5", "2.4")) {
-                FilterChip(selected = b in sel, onClick = { sel = if (b in sel) sel - b else sel + b }, label = { Text("${b}GHz（${n[b]}ch）") })
+                Pick(selected = b in sel, onClick = { sel = if (b in sel) sel - b else sel + b }, label = { Text("${b}GHz（${n[b]}ch）") })
             }
         }
         val k = sel.sumOf { n[it] ?: 0 }
@@ -163,11 +180,14 @@ fun ScanScreen(vm: MainViewModel) {
             },
         ) { Text(if (running) "PCで手動スキャン中" else "手動スキャンを送る") }
         if (live.state?.mode == "QUIET") Text("いまQUIET（山場）です。送る前に確認します。", color = w.warnInk, fontSize = 12.sp)
+        val age = live.ageMsNow()
+        if (age != null && age > STALE_MS) Text("PCの状態が${ago(age / 1000.0)}のままです。送っても、60秒以内にPCが受け取らなければ実行されません。",
+            color = w.warnInk, fontSize = 12.sp)
         SectionTitle("送った指示")
         if (cmds.isEmpty()) Text("まだありません", color = w.ink2)
         for (c in cmds) {
             val v = vm.view(c, live)
-            CommandCard(c.summary, v) { vm.sendScan(c.params.optJSONArray("bands").strings(), true) }
+            CommandCard(c.summary, v, onOpenRecord) { vm.sendScan(c.params.optJSONArray("bands").strings(), true) }
         }
     }
     confirmFor?.let { bands ->
@@ -182,7 +202,7 @@ fun ScanScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun CommandCard(title: String, v: MainViewModel.CmdView, onConfirmResend: () -> Unit) {
+private fun CommandCard(title: String, v: MainViewModel.CmdView, onOpenRecord: ((String) -> Unit)? = null, onConfirmResend: () -> Unit) {
     val w = LocalW.current
     val steps = listOf("送った", "中継が受付", "PCが受け取り", "実行中", "完了")
     val idx = when (v.step) {
@@ -200,6 +220,7 @@ private fun CommandCard(title: String, v: MainViewModel.CmdView, onConfirmResend
         }
         Text(v.text, fontSize = 13.sp, color = if (v.step == MainViewModel.Step.FAILED) w.crit else w.ink)
         if (v.needsConfirm) TextButton(onClick = onConfirmResend) { Text("確認して送り直す") }
+        if (v.record != null && onOpenRecord != null) TextButton(onClick = { onOpenRecord(v.record) }) { Text("記録を開く") }
     }
 }
 
@@ -223,6 +244,8 @@ fun BandsScreen(vm: MainViewModel) {
             val c = cmds.firstOrNull { it.requestId == wish!!.requestId }
             val v = c?.let { vm.view(it, live) }
             Text("反映待ち：${v?.text ?: "送信中"}", color = w.warnInk, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 6.dp))
+        } else if (wish != null) {
+            Text("✓ PCに反映済み（PCの状態で確かめた）", color = w.ink2, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
         }
         for (band in Channels.BANDS) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
@@ -238,6 +261,7 @@ fun BandsScreen(vm: MainViewModel) {
                     Text(
                         (if (locked) "🔒" else "") + "${Channels.freqToNumber(f)}",
                         fontSize = 13.sp, color = if (f == s.ownFreq) w.surface else if (off) w.muted else w.ink,
+                        textDecoration = if (off) TextDecoration.LineThrough else null,
                         modifier = Modifier.background(bg, RoundedCornerShape(6.dp)).clickable(enabled = !locked && band !in exB) {
                             exF = if (f in exF) exF - f else exF + f
                         }.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -253,7 +277,7 @@ fun BandsScreen(vm: MainViewModel) {
 
 // ================================================================== 4. 記録
 @Composable
-fun RecordsScreen(vm: MainViewModel) {
+fun RecordsScreen(vm: MainViewModel, open: String? = null, onOpened: () -> Unit = {}) {
     val recs by vm.records.collectAsStateWithLifecycle(emptyList())
     val msg by vm.recordsMsg.collectAsStateWithLifecycle()
     val w = LocalW.current
@@ -263,6 +287,7 @@ fun RecordsScreen(vm: MainViewModel) {
     var band by remember { mutableStateOf("") }
     var today by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.refreshRecords() }
+    LaunchedEffect(open) { if (open != null) { openId = open; onOpened() } }
     if (openId != null) { RecordDetail(vm, openId!!) { openId = null }; return }
     val metas = recs.map { it to RecordMeta.parse(JSONObject(it.metaJson)) }
     val dayStart = (System.currentTimeMillis() / 1000.0).let { it - (it + 9 * 3600) % 86400 }
@@ -270,13 +295,17 @@ fun RecordsScreen(vm: MainViewModel) {
         (kind.isEmpty() || m.kind == kind) && (loc.isEmpty() || m.location == loc) && (band.isEmpty() || band in m.bands) && (!today || m.createdAt >= dayStart)
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(kind == "", { kind = "" }, { Text("全部") })
-            FilterChip(kind == "pc_scan", { kind = "pc_scan" }, { Text("PCの手動スキャン") })
-            FilterChip(kind == "walk", { kind = "walk" }, { Text("歩測") })
-            FilterChip(today, { today = !today }, { Text("今日だけ") })
-            for (b in listOf("6", "5", "2.4")) FilterChip(band == b, { band = if (band == b) "" else b }, { Text("${b}GHz") })
-            for (l in vm.settings.locations) FilterChip(loc == l, { loc = if (loc == l) "" else l }, { Text(l) })
+        // 絞り込み：種類・日・帯域の行と、場所の行（どちらも横にスクロール）
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Pick(kind == "", { kind = "" }, { Text("全部") })
+            Pick(kind == "pc_scan", { kind = "pc_scan" }, { Text("PCの手動スキャン") })
+            Pick(kind == "walk", { kind = "walk" }, { Text("歩測") })
+            Pick(today, { today = !today }, { Text("今日だけ") })
+            for (b in listOf("6", "5", "2.4")) Pick(band == b, { band = if (band == b) "" else b }, { Text("${b}GHz") })
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("場所", fontSize = 12.sp, color = w.ink2, modifier = Modifier.align(Alignment.CenterVertically))
+            for (l in vm.settings.locations) Pick(loc == l, { loc = if (loc == l) "" else l }, { Text(l) })
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("${shown.size}件（PCの写し）", color = w.ink2, fontSize = 12.sp, modifier = Modifier.weight(1f))
@@ -300,23 +329,28 @@ fun RecordsScreen(vm: MainViewModel) {
 @Composable
 private fun RecordDetail(vm: MainViewModel, id: String, onBack: () -> Unit) {
     val w = LocalW.current
-    var rec by remember { mutableStateOf<RecordEntity?>(null) }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(id) { rec = vm.openRecord(id) }
+    // 写し（DB）を見張る：ラベルの「反映待ち」や、PCで更新された本文がそのまま画面に出る
+    val rec by remember(id) { vm.watchRecord(id) }.collectAsStateWithLifecycle(null)
+    var tried by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(id, rec?.bodyJson == null) { if (rec?.bodyJson == null) { vm.openRecord(id); tried = true } }
+    // 反映待ちの間だけ、一覧の写しを読み直して消えるのを待つ
+    LaunchedEffect(id, rec?.pendingEditedAt) {
+        if (rec?.pendingEditedAt != null) repeat(24) { delay(5_000); vm.refreshRecords().join() }
+    }
     Screen {
         TextButton(onClick = onBack) { Text("← 一覧へ") }
-        val r = rec ?: run { Text("読み込み中…", color = w.ink2); return@Screen }
+        val r = rec ?: run { Text(if (tried) "この記録はありません（中継の写しから消えた可能性）" else "読み込み中…", color = w.ink2); return@Screen }
         val meta = RecordMeta.parse(JSONObject(r.metaJson))
         val body = r.bodyJson?.let { JSONObject(it) }
         val pending = r.pendingLabelJson?.let { JSONObject(it) }
         Text("${if (r.kind == "walk") "歩測" else "PCの手動スキャン"}・${jstOf(r.createdAt)}", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-        Text("${meta.device ?: ""}・${if (meta.origin == "app") "アプリから" else "画面から"}", color = w.ink2, fontSize = 12.sp)
+        Text(listOfNotNull(meta.device, if (meta.origin == "app") "アプリから" else "画面から").joinToString("・"), color = w.ink2, fontSize = 12.sp)
         SectionTitle("ラベル")
         var location by remember(r.id, r.pendingLabelJson) { mutableStateOf(pending?.optString("location")?.takeIf { it != "null" } ?: meta.location ?: "") }
         var tags by remember(r.id, r.pendingLabelJson) { mutableStateOf((pending?.optJSONArray("tags").strings().ifEmpty { null } ?: meta.tags).joinToString("、")) }
         var memo by remember(r.id, r.pendingLabelJson) { mutableStateOf(pending?.optString("memo") ?: meta.memo) }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (l in vm.settings.locations) FilterChip(location == l, { location = l }, { Text(l) })
+            for (l in vm.settings.locations) Pick(location == l, { location = l }, { Text(l) })
         }
         OutlinedTextField(location, { location = it.take(40) }, label = { Text("場所") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(tags, { tags = it }, label = { Text("タグ（読点で区切る）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -324,7 +358,6 @@ private fun RecordDetail(vm: MainViewModel, id: String, onBack: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = {
                 vm.saveLabel(r.id, location.trim().ifEmpty { null }, tags.split('、', ',').map { it.trim() }.filter { it.isNotEmpty() }.take(10), memo)
-                scope.launch { rec = vm.openRecord(id) }
             }) { Text("ラベルを保存") }
             if (pending != null) Text("  反映待ち（PCの正本に入ると消えます）", color = w.warnInk, fontSize = 12.sp)
         }
@@ -385,17 +418,17 @@ fun WalkScreen(vm: MainViewModel) {
         if (!vm.locationEnabled()) Text("位置情報（設定 → 位置情報）をオンにしてください。オフだとスキャン結果を読めません。", color = w.crit)
         SectionTitle("場所")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (l in vm.settings.locations) FilterChip(location == l, { location = l }, { Text(l) })
+            for (l in vm.settings.locations) Pick(location == l, { location = l }, { Text(l) })
         }
         OutlinedTextField(location, { location = it.take(40) }, label = { Text("場所") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-            for (sec in listOf(30, 45, 60)) FilterChip(seconds == sec, { seconds = sec }, { Text("${sec}秒") })
+            for (sec in listOf(30, 45, 60)) Pick(seconds == sec, { seconds = sec }, { Text("${sec}秒") })
         }
         Spacer(Modifier.height(8.dp))
         Button(enabled = !ui.running, onClick = { vm.startWalk(seconds) }) { Text(if (ui.running) "測っています…" else "スキャンを始める") }
         ui.progress?.let { p ->
             if (ui.running) LinearProgressIndicator(progress = { 1f - p.secondsLeft / seconds.toFloat() }, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
-            Text("スキャン ${p.scans}回（新しい結果 ${p.fresh}・古い ${p.stale}）・局 ${p.stations}・残り ${p.secondsLeft}秒", fontSize = 12.sp, color = w.ink2)
+            Text("スキャン ${p.scans}回（新しい結果 ${p.fresh}・古い ${p.stale}）・局 ${p.stations}${if (ui.running) "・残り ${p.secondsLeft}秒" else "・測り終わり"}", fontSize = 12.sp, color = w.ink2)
         }
         ui.message?.let { Text(it, color = w.warnInk, fontSize = 13.sp) }
         if (ui.seen.isNotEmpty()) {
@@ -453,7 +486,7 @@ fun SettingsScreen(vm: MainViewModel, onDone: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Column {
                 Text("通信をモバイル回線に固定する", fontWeight = FontWeight.SemiBold)
-                Text("本番は必ずオン（ロボットのWi-Fiに流さない）。エミュレータでローカルの中継を試すときだけオフ。", fontSize = 11.sp, color = w.ink2)
+                Text("本番は必ずオン（ロボットのWi-Fiに流さない）。モバイル回線のない端末で試すときだけオフ。", fontSize = 11.sp, color = w.ink2)
             }
         }
         Spacer(Modifier.height(10.dp))

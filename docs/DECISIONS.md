@@ -6,6 +6,7 @@
 
 - **開発PC** — Ubuntu 24.04.5、カーネル7.0、Python 3.12.3（pyenv）、Node 22.21、npm 10.9、JDK 21、Android SDK（platforms 33〜36.1、build-tools 36/37、emulatorあり、system-imagesとcmdline-toolsなし）、`iw` なし。無線はRTL8852BE（AX210ではない）— 実機の層はここでは動かさない。（2026-10-14確認）
 - **PC側のPython** — Ubuntu標準3.10以上で動く書き方にする（`from __future__ import annotations`、3.11以降の機能は使わない）。開発は3.12。依存は `server/requirements.txt` で版を固定。
+- **3.10で動く版に固定し直した（2026-10-15）** — starlette 1.8.0 が3.11以上を要求するため、fastapi 0.143.1・starlette 1.7.0 にし、3.10だけ `exceptiongroup`（実行）と `tomli`（テスト）を足した（環境マーカーつき）。3.10.13 と 3.12.3 の両方でテスト206件が通る。
 - **scapyを使わない** — 依頼書は「足りなければscapyをやめる」だが、毎秒5000フレームを1コアで処理する目安とペイロードを読まない方針から、最初から軽い自前の解析にした（`server/wifiwatch/capture/`）。処理能力の測定はM1で `PROGRESS.md` に残す。
 - **TypeScriptは5.9.3** — npmの最新は7.0.2（Go製の新実装）だが、Vercelの関数のビルドがTypeScriptのJS APIを使う可能性があり、7系の互換が未確認のため。テストはvitest 5.0.4。
 - **中継は1つの関数** — `api/index.ts` に `/api/*` をまとめ（`vercel.json` の rewrites）、中身は `src/` のルータで振り分ける。冷えた起動の回数を減らし、テストもしやすいため。
@@ -117,12 +118,25 @@
 
 - **2026-10-15 Androidの確かめ（SDKのソースと api-versions.xml）** — `ScanResult.getInformationElements()` と `ScanResult.InformationElement`（getId・getIdExt・getBytes）はAPI 30から。拡張IE（id=255）の中身は拡張IDを除いたもの。`getWifiStandard()` はAPI 30、`CHANNEL_WIDTH_320MHZ`・`WIFI_STANDARD_11BE`・`getWifiSsid()` はAPI 33。`WifiManager.startScan()` はAPI 28で非推奨（使える）。`getScanResults()` は ACCESS_FINE_LOCATION と ACCESS_WIFI_STATE が要り、位置情報サービスがオンであること。スキャンは前面で2分に4回まで（開発者オプションで解除できる。developer.android.com の Wi-Fi scanning）。`ConnectivityManager.requestNetwork(NetworkRequest, NetworkCallback)` は CHANGE_NETWORK_STATE が要り、unregister するまで続く。`Network.getSocketFactory()`・`Network.getAllByName()` はAPI 21から。Android はマルチBSSIDの非送信BSSも別の結果として返す（11ax以上）。
 - **版の組み合わせ** — ユーザーの環境で動いている組み合わせに合わせた：Gradle 9.4.1、AGP 9.2.1（Kotlinは内蔵）、Kotlin 2.2.10（Composeのプラグイン）、Compose BOM 2026.02.01、KSP 2.3.12、Room 2.8.5、WorkManager 2.11.0、OkHttp 4.12.0、lifecycle 2.9.4。compileSdk・targetSdk 36、minSdk 30。
-- **モバイル回線への固定** — `requestNetwork(TRANSPORT_CELLULAR＋NET_CAPABILITY_INTERNET)` で得たNetworkに、OkHttpのソケット（`socketFactory`）と名前解決（`dns` に `Network.getAllByName`）の両方を結びつける。`bindProcessToNetwork` は使わない（操縦用アプリやWebViewに影響しないよう、wifiwatchの通信だけを結びつける）。WorkManagerの再送も同じクライアントを使う（「ネットワークあり」の条件だけに頼らない）。設定に「固定する」のスイッチ（既定オン）を置き、オフはエミュレータでローカルの中継を試すときだけ。
+- **モバイル回線への固定** — `requestNetwork(TRANSPORT_CELLULAR＋NET_CAPABILITY_INTERNET)` で得たNetworkに、OkHttpのソケット（`socketFactory`）と名前解決（`dns` に `Network.getAllByName`）の両方を結びつける。`bindProcessToNetwork` は使わない（操縦用アプリやWebViewに影響しないよう、wifiwatchの通信だけを結びつける）。WorkManagerの再送も同じクライアントを使う（「ネットワークあり」の条件だけに頼らない）。設定に「固定する」のスイッチ（既定オン）を置き、オフはモバイル回線のない端末で試すときだけ。
 - **指示は待ち行列に入れない** — 手動スキャンと帯域ON/OFFはその場で送り、20秒だけ送り直す。届かなければ「送れなかった」と出す（WorkManagerで後から送ると、回線が戻ったあとで古い手動スキャンが走りうるため）。ラベルの変更と歩測の記録は待ち行列（Room）に入れ、WorkManagerで無期限に送り直す。要求IDつきなので二重に届いても結果は同じ。
 - **トークンの保存** — Android KeystoreのAES-256-GCMの鍵で暗号化してSharedPreferencesに置く（`security-crypto` の EncryptedSharedPreferences は非推奨のため使わない）。
 - **平文のhttp** — ネットワークのセキュリティ設定で、10.0.2.2・127.0.0.1・localhost だけ許す（エミュレータからローカルの中継へ）。本番は https。
 - **歩測の記録** — 1地点で何回もスキャンして局ごとにまとめ、強さは中央値。IEは生のバイト列（`ies_hex`）で残す（PCでも同じ解析ができるように）。IEが無い局は ScanResult の channelWidth と centerFreq0 で幅を決める。30秒より古い結果（前のスキャンの残り）は使わない。
 - **画面** — 下のタブで「状態・スキャン・帯域・記録・歩測」、設定は右上。状態の画面の一番上に判定（緊急／警告／検知なし／PCから応答なし）。状態の写しが30秒より古ければ「検知なし」ではなく「PCから応答なし」と出す。chの帯（6/5/2.4GHz）はデスクトップと同じ意味の色と斜線。アイコンの部品（material-icons）は使わず、記号の文字で済ませた（依存を増やさない）。
+
+- **エミュレータ（2026-10-15、ユーザーの許可を得て入れた）** — cmdline-tools 16111833、system image android-36 google_apis x86_64、AVD `wifiwatch36`（pixel_8a）。エミュレータには模擬のWi-Fi（AndroidWifi、既定の回線）と模擬のLTE（eth0）の両方があり、どちらからも 10.0.2.2（開発PC）に届く。そこで固定はオンのまま確かめた：`adb shell svc data disable` でモバイルデータだけ切ると、Wi-Fiが生きていても「モバイル回線が使えません」になり、Wi-Fiには流れない。
+- **デバッグ版だけの起動引数** — `relay_url`・`token`・`pin_cellular` を `adb shell am start --es ...` で入れられる（エミュレータでの通しの確認のため。`BuildConfig.DEBUG` でないときは何もしない）。トークンの長さとURLの検査は設定の画面と同じ。
+- **古い状態の出し方** — 状態の写しが30秒より古いとき、端末が中継に届かない（回線の問題）なら「中継に届かない」、中継には届くがPCが状態を置いていないなら「PCから応答なし」と分けて出す（直す場所が違う）。その下の状態は薄くし、「以下は◯秒前の状態です」と添える。「◯秒前」は1秒ごとに進める（届かない間も止まらない）。
+- **見ていないchの点** — chの帯で、巡回外・手動スキャン中などのchに出る「強い局」の点は、前に見えた局（いまの様子ではない）なので白抜きにする。見ていないところの一覧は、警報より上に出す。
+- **ラベルの「反映待ち」** — 記録の画面はRoomの写しを見張り、反映待ちの間だけ5秒ごとに一覧の写しを読み直す（最大2分。1回は中継のRedisコマンド2つなので、1回の保存で最大48コマンド）。PCの正本に入ったら消える。
+- **手動スキャンの完了から記録へ** — 完了した指示のカードに「記録を開く」を置く。まだ一覧を読んでいない記録は、中継が本体に付けて返す一覧用の情報（`meta`）を使う。
+- **選んでいるチップに ✓** — 色だけに頼らない（FilterChipの選択に ✓ を付ける）。巡回外のchは灰色に加えて打ち消し線。
+
+## 開発の道具
+
+- **`tools/dev_stack.py`** — ローカルの中継（Node＋偽のRedis）と偽の無線のPCを起動する。`--part relay|pc` で別々に止めて戻せる。偽のRedisの中身は `data/dev/relay-redis.json`（gitの外、0600）に残す（Upstashは中継の関数が止まっても中身が残るので、それに合わせる）。トークンはその場で作り `data/dev/tokens.json`（0600）に置く。
+- **`tools/adbui.py`** — uiautomator の dump で画面の文字と位置を読み、文字でタップする（エミュレータでの確認用。スクリーンショットも取れる）。
 
 ## 偽の無線のモデル（実機で確かめるまでの仮定）
 

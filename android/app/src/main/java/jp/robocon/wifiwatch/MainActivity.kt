@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyDebugExtras()
         enableEdgeToEdge()
         setContent {
             WifiTheme {
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
                 LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.startPolling() }
                 LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.stopPolling() }
                 var tab by rememberSaveable { mutableStateOf(if (vm.settings.configured) "status" else "settings") }
+                var openRec by rememberSaveable { mutableStateOf<String?>(null) }
                 val live by vm.live.collectAsStateWithLifecycle()
                 val v = verdictOf(live)
                 Scaffold(
@@ -70,9 +72,9 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.padding(pad)) {
                         when (tab) {
                             "status" -> StatusScreen(vm)
-                            "scan" -> ScanScreen(vm)
+                            "scan" -> ScanScreen(vm) { openRec = it; tab = "records" }
                             "bands" -> BandsScreen(vm)
-                            "records" -> RecordsScreen(vm)
+                            "records" -> RecordsScreen(vm, openRec) { openRec = null }
                             "walk" -> WalkScreen(vm)
                             else -> SettingsScreen(vm) { tab = "status" }
                         }
@@ -80,6 +82,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * デバッグ版だけ：起動の引数で設定を入れる（エミュレータでの通しの確認用）。リリース版では何もしない。
+     *   adb shell am start -n jp.robocon.wifiwatch/.MainActivity --es relay_url http://10.0.2.2:8787 --es token XXX [--ez pin_cellular false]
+     */
+    private fun applyDebugExtras() {
+        if (!BuildConfig.DEBUG) return
+        val i = intent ?: return
+        val s = vm.settings
+        i.getStringExtra("relay_url")?.let { if (s.validateUrl(it) == null) s.relayUrl = it }
+        i.getStringExtra("token")?.let { if (it.length >= 16) s.token = it }
+        if (i.hasExtra("pin_cellular")) s.pinCellular = i.getBooleanExtra("pin_cellular", true)
     }
 
     private companion object {

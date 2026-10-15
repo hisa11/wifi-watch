@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import channels as ch
 from .clock import Clock, RealClock
 from .config import Config, ConfigError, Overrides, load_config
 from .controller import Controller
@@ -83,7 +84,9 @@ def build(cfg: Config, clock: Clock | None = None, radio: Radio | None = None, p
     if cfg.relay.url:
         from .relay_client import RelayClient
         app.relay = RelayClient(cfg.relay, ctl, store, clock, transport=relay_transport)
-    ctl.log_event("system", "start", "info", None, "起動", f"{cfg.device_name}：自ch {mon.scheduler.block.label}・{mon.scheduler.mode}")
+    sch = mon.scheduler
+    ctl.log_event("system", "start", "info", None, "起動",
+                  f"{cfg.device_name}：自ch {ch.label(sch.own_freq)}・受信ブロック {sch.block.label}・{sch.mode}")
     return app
 
 

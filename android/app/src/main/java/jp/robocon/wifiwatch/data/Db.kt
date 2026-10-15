@@ -76,6 +76,9 @@ interface RecordDao {
     @Query("SELECT * FROM records WHERE id = :id")
     suspend fun get(id: String): RecordEntity?
 
+    @Query("SELECT * FROM records WHERE id = :id")
+    fun watch(id: String): Flow<RecordEntity?>
+
     @Query("SELECT * FROM records ORDER BY createdAt DESC")
     fun all(): Flow<List<RecordEntity>>
 

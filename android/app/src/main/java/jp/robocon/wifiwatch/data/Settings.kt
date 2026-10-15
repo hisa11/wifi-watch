@@ -35,7 +35,7 @@ class Settings(context: Context) : jp.robocon.wifiwatch.net.RelayConfigSource {
         get() = prefs.getString("device_name", null) ?: Build.MODEL.lowercase().replace(' ', '-')
         set(v) = prefs.edit().putString("device_name", v.trim()).apply()
 
-    /** 本番はオン。エミュレータでローカルの中継（10.0.2.2）につなぐ確認のときだけオフにする。 */
+    /** 本番はオン。モバイル回線のない端末で試すときだけオフにする（エミュレータは模擬のモバイル回線があるのでオンのままでよい）。 */
     override var pinCellular: Boolean
         get() = prefs.getBoolean("pin_cellular", true)
         set(v) = prefs.edit().putBoolean("pin_cellular", v).apply()

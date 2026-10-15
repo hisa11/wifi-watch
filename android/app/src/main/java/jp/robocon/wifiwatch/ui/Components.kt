@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,6 +40,13 @@ import androidx.compose.ui.unit.sp
 import jp.robocon.wifiwatch.core.Channels
 import jp.robocon.wifiwatch.core.PcState
 
+/** 選んでいるかが色だけに頼らず分かるチップ（選んでいる間は ✓ を付ける）。 */
+@Composable
+fun Pick(selected: Boolean, onClick: () -> Unit, label: @Composable () -> Unit) = FilterChip(
+    selected = selected, onClick = onClick, label = label,
+    leadingIcon = if (selected) ({ Text("✓", fontWeight = FontWeight.Bold) }) else null,
+)
+
 // ------------------------------------------------------------------ 判定のカード（一目で）
 data class Verdict(val level: String, val glyph: String, val title: String, val sub: String)
 
@@ -47,8 +55,13 @@ fun verdictOf(live: MainViewModel.Live): Verdict {
     val age = live.ageMsNow()
     if (s == null) return Verdict("blind", "◌", "PCの状態がまだありません",
         live.error ?: "PCが中継に状態を置くまで待っています（開いてから10秒ほど）")
-    if (age != null && age > 30_000) return Verdict("blind", "◌", "PCから応答なし",
-        "最後の状態は${ago(age / 1000.0)}（この間のことは分かりません）")
+    if (age != null && age > STALE_MS) {
+        // 端末が中継に届かないのか、中継には届くがPCが状態を置いていないのかを分けて出す（直す場所が違う）
+        return if (live.error != null) Verdict("blind", "◌", "中継に届かない",
+            "最後の状態は${ago(age / 1000.0)}（この間のことは分かりません）・${live.error}")
+        else Verdict("blind", "◌", "PCから応答なし",
+            "中継には届いています。最後の状態は${ago(age / 1000.0)}（この間のことは分かりません）")
+    }
     val blind = blindList(s)
     return when {
         s.rxState == "failed" -> Verdict("crit", "■", "受信停止", s.rxReason.ifEmpty { "2.4/5GHzでフレームなし" })
@@ -59,11 +72,15 @@ fun verdictOf(live: MainViewModel.Live): Verdict {
     }
 }
 
+/** これより古い状態は「いまの様子」として出さない */
+const val STALE_MS = 30_000L
+
 fun blindList(s: PcState): List<String> {
     val out = mutableListOf<String>()
     s.excludedBands.forEach { out += "${it}GHz（巡回外）" }
     val ex = s.excludedFreqs.filter { Channels.bandOf(it) !in s.excludedBands }
-    if (ex.isNotEmpty()) out += "${ex.size}ch（巡回外）"
+    if (ex.size in 1..3) ex.forEach { out += "${Channels.label(it)}（巡回外）" }
+    else if (ex.isNotEmpty()) out += "${ex.size}ch（巡回外）"
     if (s.rxState == "failed") out += "全帯域（受信停止）"
     return out
 }
@@ -97,6 +114,8 @@ fun VerdictCard(v: Verdict, modifier: Modifier = Modifier) {
 }
 
 // ------------------------------------------------------------------ chの帯（見ているか・強い局）
+private val NOT_WATCHING = setOf("x", "z", "t", "u", "!")
+
 private val CODE_JP = mapOf(
     "o" to "自ch（受信中）", "i" to "自ブロック内（巡回で見る）", "p" to "巡回中", "x" to "巡回外（見ていない）",
     "z" to "手動スキャン中で止めている", "s" to "手動スキャンで今見ている", "t" to "手動スキャン待ち", "!" to "受信停止中", "u" to "まだ見ていない",
@@ -133,8 +152,14 @@ fun ChannelStrip(state: PcState, modifier: Modifier = Modifier) {
                             "!" -> hatch(top, cell, w.crit, w.surface3)
                             else -> drawRect(if (c.nOverlap > 0) w.ink2.copy(alpha = (0.15f + 0.12f * c.nOverlap).coerceAtMost(0.6f)) else w.surface3, top, cell)
                         }
-                        if (c.nStrong >= 3) drawCircle(w.warn, 3.dp.toPx(), Offset(x + cw / 2, 16.dp.toPx() + 5.dp.toPx()))
-                        else if (c.nStrong > 0) drawCircle(w.ink2, 2.dp.toPx(), Offset(x + cw / 2, 16.dp.toPx() + 5.dp.toPx()))
+                        // 見ていないchの点は、前に見えた局（いまの様子ではない）なので白抜きにする
+                        val seen = c.code !in NOT_WATCHING
+                        val dot = Offset(x + cw / 2, 16.dp.toPx() + 5.dp.toPx())
+                        if (c.nStrong > 0) {
+                            val col = if (c.nStrong >= 3) w.warn else w.ink2
+                            val rad = (if (c.nStrong >= 3) 3 else 2).dp.toPx()
+                            if (seen) drawCircle(col, rad, dot) else drawCircle(col, rad, dot, style = Stroke(1.dp.toPx()))
+                        }
                         if (c.freq == state.ownFreq) {
                             drawText(tm, "${Channels.freqToNumber(c.freq)}", Offset(x, 16.dp.toPx() + 2f), TextStyle(fontSize = 9.sp, color = w.own, fontWeight = FontWeight.Bold))
                         }
@@ -145,8 +170,9 @@ fun ChannelStrip(state: PcState, modifier: Modifier = Modifier) {
         }
         val p = picked
         Text(
-            if (p == null) "帯をタップするとchの様子が出ます。斜線＝見ていない、黄の点＝強い局が3つ以上"
-            else "${Channels.label(p.freq)}：${CODE_JP[p.code] ?: p.code}・重なる局 ${p.nOverlap}（強い ${p.nStrong}）${p.maxRssi?.let { "・最大 ${it}dBm" } ?: ""}",
+            if (p == null) "帯をタップするとchの様子が出ます。斜線＝見ていない、点＝強い局（黄＝3つ以上、白抜き＝前に見えた局）"
+            else "${Channels.label(p.freq)}：${CODE_JP[p.code] ?: p.code}・重なる局 ${p.nOverlap}（強い ${p.nStrong}）${p.maxRssi?.let { "・最大 ${it}dBm" } ?: ""}" +
+                if (p.code in NOT_WATCHING && p.nOverlap > 0) "（前に見えた局）" else "",
             fontSize = 12.sp, color = w.ink2,
         )
     }
@@ -219,11 +245,24 @@ fun Spectrum(band: String, stations: List<SpecStation>, modifier: Modifier = Mod
         val labelled = mutableListOf<androidx.compose.ui.geometry.Rect>()
         for (s in sorted.reversed().distinctBy { it.name }.take(maxLabels)) {
             val sp = s.spans.first()
-            val cx = (x(sp.lo) + x(sp.hi)) / 2
-            val text = s.name.take(14)
+            val xa = x(sp.lo)
+            val xz = x(sp.hi)
+            val text = s.name.take(16)
             val m = tm.measure(text, TextStyle(fontSize = 10.sp, fontWeight = FontWeight.SemiBold))
-            val rect = androidx.compose.ui.geometry.Rect(Offset(cx - m.size.width / 2f, y(s.rssi!!) - m.size.height - 2f), Size(m.size.width.toFloat(), m.size.height.toFloat()))
-            if (labelled.any { it.overlaps(rect) } || rect.top < 0) continue
+            val mw = m.size.width.toFloat()
+            val mh = m.size.height.toFloat()
+            val yt = y(s.rssi!!)
+            // 広い局（160/320MHz）は、真ん中が他の名前とぶつかったら上辺に沿ってずらす。それでもだめなら上辺のすぐ内側
+            val wide = xz - xa > mw * 2
+            val xs = (if (wide) listOf(0.5f, 0.25f, 0.75f, 0.12f, 0.88f) else listOf(0.5f)).map { xa + (xz - xa) * it }
+            val ys = if (wide) listOf(yt - mh - 2f, yt + 2f) else listOf(yt - mh - 2f)
+            val rect = ys.firstNotNullOfOrNull { top ->
+                xs.firstNotNullOfOrNull { cx ->
+                    val left = (cx - mw / 2f).coerceIn(l, size.width - r - mw)
+                    androidx.compose.ui.geometry.Rect(Offset(left, top), Size(mw, mh))
+                        .takeIf { c -> c.top >= 0 && labelled.none { it.overlaps(c) } }
+                }
+            } ?: continue
             labelled += rect
             drawText(m, w.ink, rect.topLeft)
         }
