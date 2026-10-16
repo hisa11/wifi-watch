@@ -6,9 +6,10 @@ const SEGS = {
   "0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc", "5": "afgcd", "6": "afgedc", "7": "abc",
   "8": "abcdefg", "9": "abcdfg", "-": "g", " ": "",
 };
-// 横長（2.5:1）。右の欄の幅いっぱいに、余白なしで収める
-const W = 640;
-const H = 256;
+// 全体は横長（約2.2:1）にして右の欄の幅いっぱいに収める。数字・文字の形（縦横の比）は元の時計のまま
+// （上の段の数字 0.54、下の段の値 0.47、時:分 0.56）。上の段は数字の高さを下げ、そのぶん横に詰めて並べる
+const W = 626;
+const H = 282;
 
 function el(tag, attrs, ...kids) {
   const e = document.createElementNS(SVGNS, tag);
@@ -90,36 +91,36 @@ export function drawClock(container, now, value, level) {
   const g = el("g");
   // 上の段：月/日・曜日・判定のドット絵
   const [mo, da] = [parts.month.padStart(2, " "), parts.day.padStart(2, " ")];
-  const top = 10, th = 118, tw = 78, tt = 16;
+  const top = 10, th = 130, tw = 70, tt = 17;
   digit(g, mo[0] === "0" ? " " : mo[0], 10, top, tw, th, tt);
-  digit(g, mo[1], 98, top, tw, th, tt);
-  g.append(el("line", { x1: 190, y1: top + th - 6, x2: 214, y2: top + 6, stroke: col(202, 70), "stroke-width": 11, "stroke-linecap": "round" }));
-  digit(g, da[0] === "0" ? " " : da[0], 226, top, tw, th, tt);
-  digit(g, da[1], 314, top, tw, th, tt);
-  text(g, parts.weekday, 402, 40, 26);
-  g.append(el("rect", { x: 444, y: top + 4, width: 6, height: th - 8, rx: 3, fill: col(447, 70) }));
-  wifiIcon(g, 478, top + 3, 14, level);
+  digit(g, mo[1], 90, top, tw, th, tt);
+  g.append(el("line", { x1: 176, y1: top + th - 6, x2: 200, y2: top + 6, stroke: col(188, 70), "stroke-width": 12, "stroke-linecap": "round" }));
+  digit(g, da[0] === "0" ? " " : da[0], 216, top, tw, th, tt);
+  digit(g, da[1], 296, top, tw, th, tt);
+  text(g, parts.weekday, 380, 42, 26);
+  g.append(el("rect", { x: 424, y: top + 4, width: 7, height: th - 8, rx: 3, fill: col(427, 75) }));
+  wifiIcon(g, 455, top + 4, 16, level);
   // 仕切りの線（赤→桃→紫）
   const defs = el("defs", null, el("linearGradient", { id: "segclock-line", x1: 0, x2: 1, y1: 0, y2: 0 },
     el("stop", { offset: "0", "stop-color": "hsl(355 90% 60%)" }), el("stop", { offset: "0.5", "stop-color": "hsl(320 90% 62%)" }),
     el("stop", { offset: "1", "stop-color": "hsl(280 90% 64%)" })));
   svg.append(defs);
-  g.append(el("rect", { x: 10, y: 136, width: W - 20, height: 6, rx: 3, fill: "url(#segclock-line)" }));
+  g.append(el("rect", { x: 10, y: 148, width: W - 20, height: 7, rx: 3, fill: "url(#segclock-line)" }));
   // 下の段：値（温度の代わり）
-  const by = 150, bh = 96;
+  const by = 164, bh = 110;
   const v = String(value.text).slice(-3).padStart(3, " ");
-  [...v].forEach((c, i) => digit(g, c, 10 + i * 68, by, 60, bh, 13));
-  text(g, value.unit, 214, 180, value.unit.length > 2 ? 22 : 26, 70);
-  value.caption.split("\n").slice(0, 2).forEach((line, i) => text(g, line, 214, 214 + i * 22, 15, 70));
-  g.append(el("rect", { x: 292, y: by + 2, width: 6, height: bh - 4, rx: 3, fill: col(295, 200) }));
+  [...v].forEach((c, i) => digit(g, c, 10 + i * 62, by, 52, bh, 15));
+  text(g, value.unit, 194, by + 44, value.unit.length > 2 ? 22 : 30, 76);
+  value.caption.split("\n").slice(0, 2).forEach((line, i) => text(g, line, 194, by + 82 + i * 22, 17, 76));
+  g.append(el("rect", { x: 280, y: by + 2, width: 6, height: bh - 4, rx: 3, fill: col(283, by + 55) }));
   // 時:分
   const hh = parts.hour.padStart(2, "0");
   const mm = parts.minute.padStart(2, "0");
-  digit(g, hh[0], 310, by, 66, bh, 14);
-  digit(g, hh[1], 386, by, 66, bh, 14);
-  for (const cy of [by + 26, by + 60]) g.append(el("rect", { x: 462, y: cy, width: 12, height: 12, fill: col(468, cy) }));
-  digit(g, mm[0], 488, by, 66, bh, 14);
-  digit(g, mm[1], 564, by, 66, bh, 14);
+  digit(g, hh[0], 300, by, 62, bh, 16);
+  digit(g, hh[1], 374, by, 62, bh, 16);
+  for (const cy of [by + 30, by + 68]) g.append(el("rect", { x: 451, y: cy, width: 13, height: 13, fill: col(457, cy) }));
+  digit(g, mm[0], 480, by, 62, bh, 16);
+  digit(g, mm[1], 554, by, 62, bh, 16);
   svg.append(g);
   container.replaceChildren(svg);
 }
