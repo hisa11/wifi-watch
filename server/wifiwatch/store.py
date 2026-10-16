@@ -9,7 +9,7 @@ import json
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -82,6 +82,26 @@ CREATE TABLE IF NOT EXISTS team_tags (
 """
 
 
+class _Rows:
+    """ロックの中で読み切った結果（sqlite3.Cursor の代わりに、fetchone・fetchall・繰り返し・lastrowid だけ）。"""
+
+    __slots__ = ("rows", "lastrowid", "rowcount")
+
+    def __init__(self, cur: sqlite3.Cursor):
+        self.rows = cur.fetchall()
+        self.lastrowid = cur.lastrowid
+        self.rowcount = cur.rowcount
+
+    def fetchone(self) -> sqlite3.Row | None:
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self) -> list[sqlite3.Row]:
+        return list(self.rows)
+
+    def __iter__(self) -> Iterator[sqlite3.Row]:
+        return iter(self.rows)
+
+
 class Store:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -96,9 +116,11 @@ class Store:
         with self.lock:
             self.db.close()
 
-    def _x(self, sql: str, args: Iterable[Any] = ()) -> sqlite3.Cursor:
+    def _x(self, sql: str, args: Iterable[Any] = ()) -> "_Rows":
+        # 1つの接続を、受信・画面・通知・中継のスレッドで共有している。実行と結果の読み出しを同じロックの中で済ませる
+        # （実行だけロックして結果を外で読むと、ほかのスレッドの実行が割り込んで結果が崩れる。COUNT(*) が None になった）
         with self.lock:
-            return self.db.execute(sql, tuple(args))
+            return _Rows(self.db.execute(sql, tuple(args)))
 
     # ------------------------------------------------------------ kv
     def kv_get(self, key: str, default: Any = None) -> Any:

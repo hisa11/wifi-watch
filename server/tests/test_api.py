@@ -263,3 +263,33 @@ def test_logs_written(env):
     assert own[0] == "ts,bssid,ssid,freq,rssi,rssi_avg,seen_ago_s" and "02:00:00:00:00:01" in own[1]
     ev = [json.loads(x) for x in (d / "events.jsonl").read_text(encoding="utf-8").splitlines()]
     assert ev[0]["category"] == "system" and ev[0]["ts"].endswith("Z")
+
+
+def test_store_is_safe_across_threads(tmp_path):
+    # 受信・画面・通知・中継のスレッドが同じ接続を使っても、結果が崩れない（COUNT(*) が None になった不具合）
+    import threading
+    from wifiwatch.store import Store
+    st = Store(tmp_path / "w.db")
+    errors = []
+
+    def writer():
+        for i in range(300):
+            st.add_event(float(i), "t", "k", "info", None, "x", "y", None, None)
+            st.notify_enqueue(float(i), "ntfy", "k", "info", {"i": i})
+
+    def reader():
+        try:
+            for _ in range(600):
+                assert isinstance(st.notify_backlog(), int)
+                st.kv_get("nothing")
+                st.events(limit=5)
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    ts = [threading.Thread(target=writer) for _ in range(2)] + [threading.Thread(target=reader) for _ in range(3)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errors and st.notify_backlog() == 600
+    st.close()

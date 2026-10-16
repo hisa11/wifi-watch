@@ -34,6 +34,7 @@ sudo -v || exit 1
 
 RPID=""
 PCPID=""
+KEEP=""
 restored=0
 restore() {
   [[ $restored -eq 1 ]] && return
@@ -42,6 +43,7 @@ restore() {
   echo "止めて、Wi-Fiを元に戻します…"
   [[ -n "$PCPID" ]] && kill "$PCPID" 2>/dev/null
   [[ -n "$RPID" ]] && sudo kill "$RPID" 2>/dev/null
+  [[ -n "$KEEP" ]] && kill "$KEEP" 2>/dev/null
   wait 2>/dev/null
   sudo ip link set "$IF" down
   sudo iw dev "$IF" set type managed
@@ -52,12 +54,31 @@ restore() {
 trap restore EXIT
 trap 'exit 130' INT TERM
 
+# 戻すときに sudo のパスワードを聞き直さないよう、動いている間は sudo の確認を延ばしておく
+# （ネットが切れている間にパスワードを聞かれて戻せない、を防ぐ）
+(while true; do sudo -n -v 2>/dev/null; sleep 60; done) &
+KEEP=$!
 sudo nmcli device set "$IF" managed no
 # radiod：起動時に管理モードでパッシブスキャン → モニタモード。決まった操作だけを受ける（root）
-sudo "$PY" -m wifiwatch.radio.radiod --interface "$IF" --socket "$SOCK" --group "$(id -gn)" --allow-uid "$(id -u)" &
+# server/ で動かす（wifiwatch のパッケージがそこにある。sudo は今いるフォルダを引き継ぐ）
+LOG="$ROOT/data/devpc/radiod.log"
+mkdir -p "$(dirname "$LOG")"
+started=$(mktemp)
+(cd "$ROOT/server" && exec sudo "$PY" -m wifiwatch.radio.radiod --interface "$IF" --socket "$SOCK" \
+  --group "$(id -gn)" --allow-uid "$(id -u)") >"$LOG" 2>&1 &
 RPID=$!
-for _ in $(seq 1 60); do [[ -S "$SOCK" ]] && break; sleep 0.5; done
-[[ -S "$SOCK" ]] || { echo "radiod が起動しません"; exit 1; }
+# 前の起動の古いソケットではなく、今回作られたソケットを待つ
+for _ in $(seq 1 60); do
+  [[ -S "$SOCK" && "$SOCK" -nt "$started" ]] && break
+  kill -0 "$RPID" 2>/dev/null || break
+  sleep 0.5
+done
+rm -f "$started"
+if ! kill -0 "$RPID" 2>/dev/null || [[ ! -S "$SOCK" ]]; then
+  echo "radiod が起動しませんでした。ログ（$LOG）："
+  tail -n 20 "$LOG"
+  exit 1
+fi
 # 本体：普通のユーザー。画面とAPIは 127.0.0.1 だけ
 (cd "$ROOT/server" && exec "$PY" -m wifiwatch --config "$CFG") &
 PCPID=$!

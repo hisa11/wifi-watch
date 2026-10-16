@@ -20,6 +20,7 @@ cd ~/wifi-watch && deploy/setup.sh wlan0      # IF名は ip -br link で確か�
 ## 0'. 開発PC（6GHz非対応の無線）で、本物の2.4/5GHzを見る
 
 どちらも本番と同じコード（radiod ＋ 本体）。6GHzは「見ていない（この無線では受けられない）」と出る。受信専用（送信・注入はしない）。
+いちばん簡単なのは、リポジトリの直下の `./start.sh`（どれで動かすか聞く。`./start.sh scan`・`./start.sh monitor`・`./start.sh fake` で直接も可）。IF名は自動で探し、画面が開けるようになったらブラウザで開き、Ctrl-C で全部止める。下はその中身。
 最初に一度だけ：
 
 ```bash
