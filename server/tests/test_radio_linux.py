@@ -309,3 +309,27 @@ def test_monitor_runs_over_radiod(radiod, tmp_path):
     m.run_for(1.5)
     assert m.analyzer.table.get("02:00:00:00:00:01") is not None
     m.radio.close()
+
+
+def _chancheck(sysnet, frames, capsys):
+    import argparse
+    from wifiwatch import hwprobe
+    r, feed = make_linux(FakeRunner(), sysnet)
+    r.tune = lambda t: None  # 合わせたことにする（受けたフレームを流し込む）
+    for fr in frames:
+        feed.send(fr)
+    hwprobe.cmd_chancheck(r, argparse.Namespace(chs="2g1", seconds=0.2, relink=False))
+    return capsys.readouterr().out
+
+
+def test_chancheck_tells_stuck_radio_from_mislabeled_radiotap(sysnet, capsys):
+    # 開発PC（rtw89）で、モニタモードなのに ch48 のフレームしか受からなかった件を見分ける道具
+    ap1 = build.beacon("02:00:00:00:00:01", build.ap_ies(F("2g1"), 20, "CH1-AP", standard="n"))
+    ap48 = build.beacon("02:00:00:00:00:30", build.ap_ies(F("5g48"), 20, "CH48-AP"))
+    ok = _chancheck(sysnet, [build.radiotap(F("2g1"), signal=-50) + ap1] * 3, capsys)
+    assert "正常" in ok
+    mislabeled = _chancheck(sysnet, [build.radiotap(F("5g48"), signal=-50) + ap1] * 3, capsys)
+    assert "B：radiotapのchがずれている" in mislabeled
+    stuck = _chancheck(sysnet, [build.radiotap(F("5g48"), signal=-50) + ap48] * 3, capsys)
+    assert "A：chが変わっていない" in stuck
+    assert "何も受からない" in _chancheck(sysnet, [], capsys)

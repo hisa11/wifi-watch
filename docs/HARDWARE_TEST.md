@@ -40,6 +40,14 @@ cd ~/wifi-watch && tools/devpc_monitor.sh wlo1
 - 巡回を速くするなら、画面でモードを PRE（下見）にする（LIVEは時間の大半を自ブロックの6GHzに使うが、この無線では合わせないので空振りになる）。
 - 万一Wi-Fiが戻らないとき：`sudo ip link set wlo1 down && sudo iw dev wlo1 set type managed && sudo ip link set wlo1 up && sudo nmcli device set wlo1 managed yes`
 
+モニタモードで局を見落とすとき（2.4GHzが0局、1つのchのフレームしか受からない等）は、無線が本当にchを変えて受けているかを確かめる（1分ほど、終わるとWi-Fiを戻す。結果は `data/devpc/monitor_check.txt`）：
+
+```bash
+cd ~/wifi-watch && tools/devpc_monitor_check.sh
+```
+
+chごとに「iwの表示・radiotapのch・ビーコンの主ch」をくらべ、A（無線がchを変えていない）か B（ドライバが radiotap に書くchがずれている）かを判定する。IFを下げて上げてから合わせるやり方でも試す。
+
 ### 0'-b. スキャンだけのモード（通信を切りたくないとき）
 
 約20秒ごとのパッシブスキャンの結果を使う（ビーコンから分かる機能だけ）。Wi-Fiは切れないが、スキャンの数秒間は通信が少し遅くなることがある。

@@ -10,14 +10,18 @@ MACヘッダまでに切ってから受ける。
   sudo .venv/bin/python -m wifiwatch.hwprobe --interface wlan0 reload-check
   sudo .venv/bin/python -m wifiwatch.hwprobe --interface wlan0 bench --ch 6g37 --width 160 --seconds 30
   sudo .venv/bin/python -m wifiwatch.hwprobe --interface wlan0 own-rssi --bssid aa:bb:.. --minutes 10
+  sudo .venv/bin/python -m wifiwatch.hwprobe --interface wlan0 chancheck --chs 2g1,2g6,2g11,5g36,5g48 --seconds 2
 """
 from __future__ import annotations
 
 import argparse
+import re
+import select
 import statistics
 import sys
 import time
 from collections import Counter
+from typing import Any
 
 from . import channels as ch
 from .analyzer.core import Analyzer
@@ -76,6 +80,117 @@ def cmd_frames(r: LinuxRadio, a: argparse.Namespace) -> int:
     for st in sorted(an.table.all(), key=lambda s: s.rssi or -200, reverse=True):
         print(f"    {st.bssid} {st.ssid or '(非公開)'!s:24} 主{ch.label(st.primary_freq)} {st.width_label}MHz "
               f"{st.rssi}dBm {st.standard} 受けたch={sorted(ch.freq_to_number(f) for f in st.seen_on)}")
+    return 0
+
+
+def _beacon_freq(info: ies.BssInfo) -> int | None:
+    """ビーコンの中身（DS Parameter か HT Operation のch番号）だけから決めた主ch（MHz）。radiotap のchには頼らない。"""
+    num = info.ds_channel if info.ds_channel else (info.ht.primary if info.ht else None)
+    if not num:
+        return None
+    if 1 <= num <= 13:
+        return 2407 + 5 * num
+    if num == 14:
+        return 2484
+    if 32 <= num <= 177:
+        return 5000 + 5 * num
+    return None
+
+
+def _near(f: int, g: int | None, band_width: int = 25) -> bool:
+    return g is not None and abs(f - g) <= band_width
+
+
+def cmd_chancheck(r: LinuxRadio, a: argparse.Namespace) -> int:
+    """chを合わせたとき、無線が本当にそのchで受けているかを確かめる。
+
+    受けたフレームを ch で捨てずにそのまま数え、radiotap に書かれた ch と、ビーコンの中身に書かれた主ch（APの本当のch）を
+    くらべる。次のどちらかを見分ける：
+      A：無線がchを変えていない（radiotap もビーコンの主chも、前のchのまま）
+      B：無線は合っているが、ドライバが radiotap に書く ch がずれている（ビーコンの主chは合わせたchのあたり）
+    """
+    refs = [x.strip() for x in a.chs.split(",") if x.strip()]
+    how = "（chごとにIFを下げて上げてから）" if a.relink else ""
+    print(f"[chancheck] {r.ifname}（ドライバ {r.driver() or '不明'}）{how}。chごとに {a.seconds}秒、受けたフレームを捨てずに数える")
+    print(f"  {'合わせたch':<14}{'iwの表示':<12}{'フレーム':>8}  {'radiotapのch（多い順）':<34}{'ビーコンの主ch（多い順）':<34}判定")
+    verdicts: Counter[str] = Counter()
+    for ref in refs:
+        f = ch.parse_channel_ref(ref)
+        err = None
+        try:
+            if a.relink:  # 回避のやり方：IFを下げて上げてから合わせる
+                r._close_sock()
+                r._link(False)
+                r._link(True)
+                r.tuning = None
+            r.tune(validate_tuning(f, 20, f))
+        except RadioError as e:
+            err = str(e)
+        info = r._cmd(["iw", "dev", r.ifname, "info"], 3.0, check=False).out
+        m = re.search(r"channel \d+ \((\d+) MHz\)", info)
+        iwf = int(m.group(1)) if m else None
+        if r.sock is None:
+            r._reopen()
+        assert r.sock is not None
+        rt: Counter[Any] = Counter()
+        bc: Counter[int] = Counter()
+        n = 0
+        end = time.monotonic() + a.seconds
+        while time.monotonic() < end:
+            rd, _, _ = select.select([r.sock], [], [], max(0.0, end - time.monotonic()))
+            if not rd:
+                continue
+            while True:
+                try:
+                    k = r.sock.recv_into(r.buf)
+                except (BlockingIOError, InterruptedError):
+                    break
+                if k <= 0:
+                    break
+                fr = bytes(r.buf[:k])
+                n += 1
+                try:
+                    rx = radiotap.parse(fr)
+                except radiotap.RadiotapError:
+                    rt["壊れた"] += 1
+                    continue
+                rt[rx.freq] += 1
+                try:
+                    h = dot11.parse_header(fr, rx.length, len(fr))
+                except dot11.Dot11Error:
+                    continue
+                if h.ftype == 0 and h.subtype == dot11.ST_BEACON:
+                    stop = len(fr) - 4 if rx.flags & radiotap.FLAG_FCS_AT_END else len(fr)
+                    body = rx.length + h.hdr_len + 12
+                    if body <= stop:
+                        try:
+                            bf = _beacon_freq(ies.parse_bss(fr, body, stop))
+                        except Exception:  # 壊れたビーコンは数えない
+                            bf = None
+                        if bf:
+                            bc[bf] += 1
+        top_rt = next((k for k, _ in rt.most_common() if isinstance(k, int)), None)
+        top_bc = bc.most_common(1)[0][0] if bc else None
+        if err:
+            v = f"合わせられない：{err[:60]}"
+        elif n == 0:
+            v = "何も受からない（APがいないか、受けられていない）"
+        elif top_rt == f or (top_rt is None and _near(f, top_bc)):
+            v = "正常"
+        elif top_bc is not None and _near(f, top_bc):
+            v = f"B：radiotapのchがずれている（{ch.label(top_rt) if top_rt else '?'}と書かれる）"
+        elif top_bc is not None and _near(top_rt or 0, top_bc):
+            v = f"A：chが変わっていない（{ch.label(top_rt) if top_rt else '?'}のまま）"
+        else:
+            v = "分からない（ビーコンが少ない）"
+        verdicts[v.split("：")[0]] += 1
+        fmt = lambda c: "、".join(f"{ch.label(k) if isinstance(k, int) else k}×{v}" for k, v in c.most_common(3)) or "なし"  # noqa: E731
+        print(f"  {ch.label(f):<14}{(str(iwf) + 'MHz') if iwf else '—':<12}{n:>8}  {fmt(rt):<34}{fmt(bc):<34}{v}")
+    print(f"  まとめ：{dict(verdicts)}")
+    if verdicts.get("A"):
+        print("  → A：無線がchを変えていません。モニタモードにする前の接続（ch）のままの可能性。")
+    if verdicts.get("B"):
+        print("  → B：ドライバが radiotap に書く ch がずれています。受信そのものはできています。")
     return 0
 
 
@@ -202,6 +317,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ch", default="6g37")
     p.add_argument("--width", type=int, default=160)
     p.add_argument("--seconds", type=float, default=30)
+    p = sub.add_parser("chancheck")
+    p.add_argument("--chs", default="2g1,2g6,2g11,5g36,5g48,5g100,5g149")
+    p.add_argument("--seconds", type=float, default=2.0)
+    p.add_argument("--relink", action="store_true", help="chごとにIFを下げて上げてから合わせる")
     p = sub.add_parser("own-rssi")
     p.add_argument("--bssid", required=True)
     p.add_argument("--ch", default="6g37")
@@ -211,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     r = LinuxRadio(a.interface)
     try:
         return {"frames": cmd_frames, "switch": cmd_switch, "survey": cmd_survey, "eht": cmd_eht,
-                "reload-check": cmd_reload, "bench": cmd_bench, "own-rssi": cmd_own}[a.cmd](r, a)
+                "reload-check": cmd_reload, "bench": cmd_bench, "own-rssi": cmd_own, "chancheck": cmd_chancheck}[a.cmd](r, a)
     except RadioError as e:
         print(f"失敗：{e}", file=sys.stderr)
         return 2

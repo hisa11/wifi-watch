@@ -83,7 +83,11 @@ class Monitor:
         th = cfg.thresholds
         self.alerts = AlertManager(self.clock, th.clear_after_s, th.renotify_suppress_s, th.levels,
                                    once_store, persist_once)
-        self.liveness = LivenessMonitor(self.clock, self.engine, th.liveness_empty_cycles)
+        rf = None
+        if cfg.radio.kind != "fake":  # 本物の無線：RF-kill（無線の電源オフ）を /sys から読む
+            from .radio import rfkill
+            rf = lambda: rfkill.state(cfg.interface)  # noqa: E731
+        self.liveness = LivenessMonitor(self.clock, self.engine, th.liveness_empty_cycles, rfkill=rf)
         self.detector = Detector(cfg, self.clock, self.analyzer, self.scheduler, self.classifier, self.alerts,
                                  self.signatures, rx_status=self.liveness.status)
         self.on_alert_event: list[Callable[[AlertEvent], None]] = []

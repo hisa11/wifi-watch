@@ -26,8 +26,14 @@ json.dump(c, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 EOF
 fi
 
+RF=$(cd "$ROOT/server" && "$PY" -c "from wifiwatch.radio import rfkill; print(rfkill.state('$IF') or '')")
+if [[ -n "$RF" ]]; then
+  echo "無線が RF-kill で止められています（$RF）。Wi-Fi をオンにしてから、もう一度実行してください。"
+  exit 1
+fi
 echo "これから $IF を NetworkManager から外し、モニタモードにします。動いている間、このPCのWi-Fiの通信は切れます。"
 echo "（Claude など、ネットを使うアプリも止まります。Ctrl-C で止めるとWi-Fiを元に戻します）"
+echo "動いている間は、画面のWi-Fiのスイッチや機内モードを押さないでください（無線が止まり、受信も止まります）。"
 read -r -p "続けますか？ [y/N] " ans
 [[ "$ans" == "y" || "$ans" == "Y" ]] || exit 0
 sudo -v || exit 1
@@ -59,6 +65,7 @@ trap 'exit 130' INT TERM
 (while true; do sudo -n -v 2>/dev/null; sleep 60; done) &
 KEEP=$!
 sudo nmcli device set "$IF" managed no
+sleep 2  # NetworkManager が接続を切り終えるのを待つ（つながったままモニタにしない）
 # radiod：起動時に管理モードでパッシブスキャン → モニタモード。決まった操作だけを受ける（root）
 # server/ で動かす（wifiwatch のパッケージがそこにある。sudo は今いるフォルダを引き継ぐ）
 LOG="$ROOT/data/devpc/radiod.log"

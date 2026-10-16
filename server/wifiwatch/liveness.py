@@ -5,6 +5,9 @@
 - それでも次の周期に受信しなければ「失敗」（crit を出す）。その後も一定間隔で復旧を試み続ける。
 - 自chが静かなこと自体は故障とみなさない（静かな6GHzでは正常なため）。
 - 自ブロックへのtuneが続けて失敗するとき（6GHzが無効になった等）も、同じ手順で復旧する。
+- 無線が RF-kill（画面のWi-Fiのスイッチ・機内モード・キー）で止められているときは、復旧の手順を回さず、
+  それを理由に「失敗」にする。RF-kill が解けたら、すぐに手順をはじめからやり直す。
+- 「失敗」の記録は、状態か理由が変わったときだけ（周期ごとに同じ記録を積まない）。
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ from typing import Any, Callable
 
 from .clock import Clock
 from .engine import Engine, SlotResult
+from .radio import rfkill as rfk
 from .radio.base import RadioError
 
 log = logging.getLogger(__name__)
@@ -20,13 +24,15 @@ log = logging.getLogger(__name__)
 
 class LivenessMonitor:
     def __init__(self, clock: Clock, engine: Engine, empty_periods: int = 2, own_tune_failures: int = 3,
-                 retry_after_s: float = 300.0):
+                 retry_after_s: float = 300.0, rfkill: Callable[[], str | None] | None = None):
         self.clock = clock
         self.engine = engine
         self.radio = engine.radio
         self.needed = empty_periods
         self.own_tune_failures = own_tune_failures
         self.retry_after_s = retry_after_s
+        self.rfkill = rfkill or (lambda: None)
+        self.rfkill_blocked = False
         self.state = "ok"  # ok / suspect / recovering / failed
         self.step = 0  # 0: まだ何もしていない 1: モニタを再設定した 2: ドライバを読み込み直した
         self.reason = ""
@@ -77,6 +83,11 @@ class LivenessMonitor:
                 self.last_frames_epoch = self.clock.time()
             if s.liveness_last:
                 self._finalize()  # この周期の生存確認の枠はこれで終わり
+        if self.state == "failed" and self.rfkill_blocked and self.rfkill() is None:
+            self.rfkill_blocked = False
+            self.step = 0
+            self._recover("RF-kill が解けた")
+            return
         if self.state == "failed" and self.failed_since is not None and \
                 self.clock.monotonic() - self.failed_since >= self.retry_after_s:
             self.failed_since = self.clock.monotonic()
@@ -105,6 +116,13 @@ class LivenessMonitor:
     def _recover(self, why: str) -> None:
         self.empty = 0
         self.engine.current = None  # 次の枠で必ずtuneし直す
+        rf = self.rfkill()
+        if rf:
+            # 無線が止められている：モニタの再設定もドライバの読み込み直しも効かない。理由をはっきり出して待つ
+            self.step = 0
+            self.rfkill_blocked = True
+            self._fail(rfk.describe(rf))
+            return
         if self.step == 0:
             self.state = "recovering"
             self._note("reset_monitor", why=why)
@@ -139,8 +157,10 @@ class LivenessMonitor:
         self._fail(f"復旧できません（{why}）")
 
     def _fail(self, reason: str) -> None:
+        changed = self.state != "failed" or self.reason != reason
         if self.state != "failed":
             self.failed_since = self.clock.monotonic()
         self.state = "failed"
         self.reason = reason
-        self._note("failed", reason=reason)
+        if changed:  # 同じ失敗を周期ごとに記録しない
+            self._note("failed", reason=reason)

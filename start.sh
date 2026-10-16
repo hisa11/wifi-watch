@@ -68,6 +68,11 @@ if [[ "$MODE" != "fake" ]]; then
   [[ "$IF" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || { echo "IF名が不正です: $IF"; exit 2; }
   [[ -d /sys/class/net/$IF ]] || { echo "$IF がありません（ip -br link で名前を確かめてください）"; exit 2; }
   command -v iw >/dev/null || { echo "iw がありません： sudo apt install iw"; exit 2; }
+  RF=$(cd "$ROOT/server" && "$PY" -c "from wifiwatch.radio import rfkill; print(rfkill.state('$IF') or '')")
+  if [[ -n "$RF" ]]; then
+    echo "無線が RF-kill で止められています（$RF）。Wi-Fi をオンにしてから、もう一度実行してください。"
+    exit 1
+  fi
 fi
 
 open_browser() {

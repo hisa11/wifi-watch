@@ -118,7 +118,9 @@ class Controller:
         msgs = {"reset_monitor": "モニタを再設定", "reload_driver": "iwlwifiを読み込み直し（管理モードでスキャン→国設定の確認→モニタ）",
                 "recovered": "受信が戻った", "failed": "復旧できない", "reset_monitor_failed": "モニタの再設定に失敗"}
         level = "crit" if what == "failed" else ("info" if what == "recovered" else "warn")
-        self.log_event("radio", what, level, "liveness", "受信の見張り", msgs.get(str(what), str(what)), None, note)
+        detail = note.get("error") or note.get("reason") or note.get("why")
+        msg = msgs.get(str(what), str(what)) + (f"：{detail}" if detail else "")
+        self.log_event("radio", what, level, "liveness", "受信の見張り", msg[:300], None, note)
 
     def _on_calibration(self, cal: dict[str, Any]) -> None:
         self.store.kv_set("calibration", cal)

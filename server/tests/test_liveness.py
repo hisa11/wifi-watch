@@ -143,3 +143,36 @@ def test_pre_calibration_after_5_minutes(tmp_path):
     assert c["hints"]
     m.run_for(300)
     assert len(cals) == 1  # 同じPREの間は1回だけ
+
+
+def test_rfkill_is_reported_instead_of_recovery_and_resumes(tmp_path):
+    # 開発PCでモニタモードの間に、画面のWi-Fiのスイッチ（RF-kill）で無線が止められた（実際に起きた）
+    m, radio, events = make(tmp_path)
+    blocked = {"v": None}
+    m.liveness.rfkill = lambda: blocked["v"]
+    notes = []
+    m.liveness.on_change.append(notes.append)
+    m.run_for(30)
+    radio.stalled = True
+    radio.stall_fix = "monitor"
+    blocked["v"] = "soft"
+    m.run_for(240)
+    assert m.liveness.state == "failed" and "RF-kill" in m.liveness.reason and "ソフト" in m.liveness.reason
+    assert radio.calls == []  # モニタの再設定もドライバの読み込み直しもしない（効かない）
+    assert len([n for n in notes if n["what"] == "failed"]) == 1  # 同じ失敗を周期ごとに記録しない
+    assert [e for e in events if e.type == "rx_stop"]
+    blocked["v"] = None  # Wi-Fi をオンに戻した
+    m.run_for(60)
+    assert radio.calls[:1] == ["reset_monitor"] and m.liveness.state == "ok"
+
+
+def test_failed_is_recorded_once(tmp_path):
+    m, radio, events = make(tmp_path)
+    notes = []
+    m.liveness.on_change.append(notes.append)
+    m.run_for(30)
+    radio.stalled = True
+    radio.stall_fix = None
+    m.run_for(200)  # 5分の再試行より短い間：失敗の記録は1回だけ
+    assert m.liveness.state == "failed"
+    assert len([n for n in notes if n["what"] == "failed"]) == 1
