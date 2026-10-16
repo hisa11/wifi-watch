@@ -109,13 +109,20 @@ def cmd_chancheck(r: LinuxRadio, a: argparse.Namespace) -> int:
       A：無線がchを変えていない（radiotap もビーコンの主chも、前のchのまま）
       B：無線は合っているが、ドライバが radiotap に書く ch がずれている（ビーコンの主chは合わせたchのあたり）
     """
-    refs = [x.strip() for x in a.chs.split(",") if x.strip()]
+    refs = []
+    for x in (y.strip() for y in a.chs.split(",")):
+        if not x:
+            continue
+        try:
+            refs.append(ch.parse_channel_ref(x))
+        except ValueError as e:  # 使えないchは飛ばして続ける（全体を止めない）
+            print(f"  （{x} は飛ばします：{e}）")
+    refs = list(dict.fromkeys(refs))
     how = "（chごとにIFを下げて上げてから）" if a.relink else ""
     print(f"[chancheck] {r.ifname}（ドライバ {r.driver() or '不明'}）{how}。chごとに {a.seconds}秒、受けたフレームを捨てずに数える")
     print(f"  {'合わせたch':<14}{'iwの表示':<12}{'フレーム':>8}  {'radiotapのch（多い順）':<34}{'ビーコンの主ch（多い順）':<34}判定")
     verdicts: Counter[str] = Counter()
-    for ref in refs:
-        f = ch.parse_channel_ref(ref)
+    for f in refs:
         err = None
         try:
             if a.relink:  # 回避のやり方：IFを下げて上げてから合わせる
@@ -318,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--width", type=int, default=160)
     p.add_argument("--seconds", type=float, default=30)
     p = sub.add_parser("chancheck")
-    p.add_argument("--chs", default="2g1,2g6,2g11,5g36,5g48,5g100,5g149")
+    p.add_argument("--chs", default="2g1,2g6,2g11,5g36,5g48,5g100,5g120")
     p.add_argument("--seconds", type=float, default=2.0)
     p.add_argument("--relink", action="store_true", help="chごとにIFを下げて上げてから合わせる")
     p = sub.add_parser("own-rssi")
