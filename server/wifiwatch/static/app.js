@@ -757,7 +757,6 @@ function positionSplitters() {
   const single = getComputedStyle(lay).gridTemplateColumns.trim().split(/\s+/).length === 1;
   const solo = ui.bandView !== "all";
   const top = solo ? card(BAND_CARD[ui.bandView]) : card("chart6");
-  const rows = solo ? [top] : [card("chart6"), card("chart5"), card("chart24")];
   const place = (key, show, x, y, w, hh) => {
     const sp = lay.querySelector(`.splitter[data-key="${key}"]`);
     if (!sp) return;
@@ -769,8 +768,8 @@ function positionSplitters() {
   };
   const gap = 12;
   const tR = R(top);
-  const bottom = Math.max(...rows.map((c) => R(c).bottom));
-  place("side", !single, R(document.querySelector(".side")).left - gap / 2 - 6, tR.top, null, bottom - tR.top);
+  const sR = R(document.querySelector(".side"));
+  place("side", !single, sR.left - gap / 2 - 6, tR.top, null, sR.bottom - tR.top);
   place("h6", true, tR.left, tR.bottom + gap / 2 - 6, tR.width, null);
   if (!solo) {
     const f = R(card("chart5")), t = R(card("chart24"));
@@ -1645,6 +1644,9 @@ function init() {
   applyBandView();
   applySplit();
   buildSplitters();
+  // 下の段（タブの中身）や右の欄の長さが変わったら、境目の位置を合わせ直す
+  const ro = new ResizeObserver(() => positionSplitters());
+  for (const e of [$("layout"), document.querySelector(".side"), document.querySelector(".lower")]) ro.observe(e);
   $("segclock").addEventListener("click", () => {
     ui.clockMetric = CLOCK_METRICS[(CLOCK_METRICS.indexOf(ui.clockMetric) + 1) % CLOCK_METRICS.length];
     prefs.set("clockMetric", ui.clockMetric);

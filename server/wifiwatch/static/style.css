@@ -179,22 +179,22 @@ body.stale .layout { opacity: 0.6; }
   display: grid; gap: 12px; padding: 12px 16px 24px; position: relative;
   /* 境目をドラッグして変える（app.js の applySplit が変数を入れる） */
   grid-template-columns: minmax(0, var(--c1, 1fr)) minmax(0, var(--c2, 1fr)) var(--side-w, 360px);
+  /* 右の欄は下の段（局の一覧など）の横まで伸ばす。右の欄が長いときに伸びるのは下の段（1fr）だけにして、
+     グラフの行の高さは変えない（グラフを小さくしても、境目がマウスについてくる） */
+  grid-template-rows: auto auto 1fr;
   grid-template-areas:
     "six six side"
     "five two4 side"
-    "lower lower lower";
+    "lower lower side";
 }
 .spectrum { grid-area: six; }
 .side { grid-area: side; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-/* 右の欄は行の高さを決めない（グラフを小さくしても、境目がマウスについてくる）。グラフより長いときは欄の中で巻き取る */
-@media (min-width: 1201px) {
-  .side { height: 0; min-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-}
 .area-five { grid-area: five; }
 .area-two4 { grid-area: two4; }
 .lower { grid-area: lower; }
 @media (max-width: 1200px) {
-  .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "six" "side" "five" "two4" "lower"; }
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "six" "side" "five" "two4" "lower"; }
+  .segclock { align-self: center; max-width: 260px; }
 }
 /* 1つの帯域だけ表示：ほかを隠し、選んだ帯域を6GHzの場所（横2列）に大きく描く */
 .viewbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px 0; font-size: 12px; color: var(--ink-2); }
@@ -477,5 +477,5 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 body.resizing, body.resizing * { user-select: none; cursor: inherit; }
 
 /* 7セグメントの時計（segclock.js） */
-.segclock { padding: 6px; background: #000; border-color: #000; width: 100%; max-width: 480px; align-self: center; }
-.segclock-svg { display: block; width: 100%; height: auto; cursor: pointer; }
+.segclock { padding: 6px; background: #000; border-color: #000; width: 100%; }
+.segclock-svg { display: block; width: 100%; max-width: 240px; height: auto; margin: 0 auto; cursor: pointer; }
