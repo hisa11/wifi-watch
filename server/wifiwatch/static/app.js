@@ -1,3 +1,4 @@
+import { drawClock } from "./segclock.js";
 // wifiwatch ダッシュボード（127.0.0.1だけ）。外部の資源は読まない。
 // 外から来た文字（SSIDなど）は必ず textContent で入れる（innerHTMLに入れない）。
 
@@ -161,6 +162,8 @@ const ui = {
   stSort: prefs.get("stSort", { key: "rssi", asc: false }),
   pointer: {},
   bandView: prefs.get("bandView", "all"),
+  clockMetric: prefs.get("clockMetric", "stations"),
+  verdictLevel: "blind",
   records: { list: [], selected: null, detail: null, filter: { kind: "", location: "", band: "" }, lastFetch: 0 },
   events: { list: [], category: "", lastFetch: 0 },
   clients: { list: [], lastFetch: 0 },
@@ -466,6 +469,7 @@ function renderTop(st) {
   else if (c.warn) { lvl = "warn"; icon = "▲"; text = `警告 ${c.warn}`; sub = st.alerts.find((a) => a.level === "warn")?.title || ""; }
   else if (st.manual && st.manual.state !== "done") { lvl = "blind"; icon = "◌"; text = "検知なし"; sub = "手動スキャン中は自chを見ていません"; }
   v.className = `verdict lvl-${lvl}`;
+  ui.verdictLevel = lvl;
   v.querySelector(".verdict-icon").textContent = icon;
   v.querySelector(".verdict-text").textContent = text;
   v.querySelector(".verdict-sub").textContent = sub;
@@ -604,6 +608,7 @@ function setBandView(v) {
   prefs.set("bandView", v);
   applyBandView();
   if (ui.state) renderCharts(ui.state);
+  positionSplitters();
 }
 
 function applyBandView() {
@@ -623,6 +628,160 @@ function soloHeight() {
   return Math.round(Math.max(300, Math.min(window.innerHeight - 300, 760)));
 }
 
+// ------------------------------------------------------------------ 時計（7セグメント。segclock.js）
+// 下の段の値：温度の代わりに、押すたびに いる局 → 自APの強さ → 強い局 と変わる
+const CLOCK_METRICS = ["stations", "own_rssi", "strong"];
+
+function clockValue(st) {
+  const m = ui.clockMetric;
+  if (!st) return { text: "--", unit: m === "own_rssi" ? "dBm" : "局", caption: "PCの\n状態なし" };
+  const present = st.stations.filter((q) => q.present);
+  if (m === "own_rssi") {
+    const own = present.filter((q) => q.kind === "own" && q.rssi != null).sort((a, b) => b.rssi - a.rssi)[0];
+    return { text: own ? String(Math.max(own.rssi, -99)) : "--", unit: "dBm", caption: own ? "自APの\n強さ" : "自APが\n見えない" };
+  }
+  if (m === "strong") {
+    const n = present.filter((q) => q.rssi != null && q.rssi >= st.thresholds.strong_rssi_dbm).length;
+    return { text: String(Math.min(n, 999)), unit: "局", caption: `強い局\n${st.thresholds.strong_rssi_dbm}dBm以上` };
+  }
+  return { text: String(Math.min(present.length, 999)), unit: "局", caption: "いる局\n全帯域" };
+}
+
+function renderClock() {
+  const box = $("segclock");
+  if (!box) return;
+  const stale = document.body.classList.contains("stale") || !ui.state;
+  drawClock(box, new Date(), clockValue(stale ? null : ui.state), stale ? "blind" : ui.verdictLevel);
+}
+
+// ------------------------------------------------------------------ 境目をドラッグして大きさを変える
+// 6GHzの高さ・5GHzと2.4GHzの幅の割合・5/2.4GHzの高さ・右の欄の幅・1つだけ表示のときの高さ。ダブルクリックで元に戻す
+const SPLIT_DEF = { sideW: 360, ratio5: 0.5, h6: 300, h5: 150, hSolo: null };
+ui.split = { ...SPLIT_DEF, ...prefs.get("split", {}) };
+const SPLIT_LIM = { sideW: [240, 760], ratio5: [0.2, 0.8], h6: [140, 1000], h5: [90, 800], hSolo: [200, 1400] };
+const clampK = (k, v) => Math.max(SPLIT_LIM[k][0], Math.min(SPLIT_LIM[k][1], v));
+let chartRaf = 0;
+
+function applySplit() {
+  const lay = $("layout");
+  lay.style.setProperty("--side-w", `${ui.split.sideW}px`);
+  lay.style.setProperty("--c1", `${ui.split.ratio5}fr`);
+  lay.style.setProperty("--c2", `${1 - ui.split.ratio5}fr`);
+}
+
+function scheduleCharts() {
+  if (chartRaf) return;
+  chartRaf = requestAnimationFrame(() => {
+    chartRaf = 0;
+    if (ui.state) renderCharts(ui.state);
+    positionSplitters();
+  });
+}
+
+function buildSplitters() {
+  const lay = $("layout");
+  const defs = [
+    ["side", "v", "右の欄の幅"], ["mid", "v", "5GHzと2.4GHzの幅"], ["h6", "h", "上のグラフの高さ"], ["h5", "h", "5GHz・2.4GHzのグラフの高さ"],
+  ];
+  for (const [key, dir, name] of defs) {
+    const sp = h("div", { class: `splitter ${dir}`, role: "separator", tabindex: 0, "aria-orientation": dir === "v" ? "vertical" : "horizontal",
+      "aria-label": name, title: `ドラッグで${name}を変える（ダブルクリックで元に戻す）`, dataset: { key } });
+    sp.addEventListener("pointerdown", (e) => startDrag(e, sp));
+    sp.addEventListener("dblclick", () => {
+      const k = splitKey(sp);
+      ui.split[k] = SPLIT_DEF[k];
+      prefs.set("split", ui.split);
+      applySplit();
+      scheduleCharts();
+    });
+    sp.addEventListener("keydown", (e) => {
+      const k = splitKey(sp);
+      const step = k === "ratio5" ? 0.05 : 20;
+      const d = { ArrowLeft: -step, ArrowUp: -step, ArrowRight: step, ArrowDown: step }[e.key];
+      if (d == null) return;
+      e.preventDefault();
+      const cur = ui.split[k] ?? soloHeight();
+      ui.split[k] = clampK(k, cur + (k === "sideW" ? -d : d));
+      prefs.set("split", ui.split);
+      applySplit();
+      scheduleCharts();
+    });
+    lay.append(sp);
+  }
+}
+
+function splitKey(sp) {
+  const k = sp.dataset.key;
+  if (k === "side") return "sideW";
+  if (k === "mid") return "ratio5";
+  if (k === "h6") return ui.bandView !== "all" ? "hSolo" : "h6";
+  return "h5";
+}
+
+function startDrag(e, sp) {
+  e.preventDefault();
+  sp.setPointerCapture(e.pointerId);
+  const k = splitKey(sp);
+  const start = { x: e.clientX, y: e.clientY, v: ui.split[k] ?? soloHeight() };
+  const five = $("chart5").closest(".card").getBoundingClientRect();
+  const two4 = $("chart24").closest(".card").getBoundingClientRect();
+  sp.classList.add("dragging");
+  document.body.classList.add("resizing");
+  const move = (ev) => {
+    if (k === "ratio5") ui.split.ratio5 = clampK(k, (ev.clientX - five.left) / Math.max(1, two4.right - five.left));
+    else if (k === "sideW") ui.split.sideW = clampK(k, start.v - (ev.clientX - start.x));
+    else ui.split[k] = clampK(k, start.v + (ev.clientY - start.y));
+    applySplit();
+    scheduleCharts();
+  };
+  const up = () => {
+    sp.removeEventListener("pointermove", move);
+    sp.removeEventListener("pointerup", up);
+    sp.removeEventListener("pointercancel", up);
+    sp.classList.remove("dragging");
+    document.body.classList.remove("resizing");
+    prefs.set("split", ui.split);
+  };
+  sp.addEventListener("pointermove", move);
+  sp.addEventListener("pointerup", up);
+  sp.addEventListener("pointercancel", up);
+}
+
+/** 境目のつまみを、いまのカードの位置に置く（描くたびに呼ぶ）。 */
+function positionSplitters() {
+  const lay = $("layout");
+  if (!lay) return;
+  const L = lay.getBoundingClientRect();
+  const card = (id) => $(id).closest(".card");
+  const R = (e) => e.getBoundingClientRect();
+  const single = getComputedStyle(lay).gridTemplateColumns.trim().split(/\s+/).length === 1;
+  const solo = ui.bandView !== "all";
+  const top = solo ? card(BAND_CARD[ui.bandView]) : card("chart6");
+  const rows = solo ? [top] : [card("chart6"), card("chart5"), card("chart24")];
+  const place = (key, show, x, y, w, hh) => {
+    const sp = lay.querySelector(`.splitter[data-key="${key}"]`);
+    if (!sp) return;
+    sp.hidden = !show;
+    if (!show) return;
+    sp.style.left = `${x - L.left}px`; sp.style.top = `${y - L.top}px`;
+    if (w != null) sp.style.width = `${w}px`;
+    if (hh != null) sp.style.height = `${hh}px`;
+  };
+  const gap = 12;
+  const tR = R(top);
+  const bottom = Math.max(...rows.map((c) => R(c).bottom));
+  place("side", !single, R(document.querySelector(".side")).left - gap / 2 - 6, tR.top, null, bottom - tR.top);
+  place("h6", true, tR.left, tR.bottom + gap / 2 - 6, tR.width, null);
+  if (!solo) {
+    const f = R(card("chart5")), t = R(card("chart24"));
+    place("mid", !single, (f.right + t.left) / 2 - 6, f.top, null, f.height);
+    const last = single ? t : (f.bottom > t.bottom ? f : t);
+    place("h5", true, single ? t.left : f.left, last.bottom + gap / 2 - 6, single ? t.width : t.right - f.left, null);
+  } else {
+    place("mid", false); place("h5", false);
+  }
+}
+
 function renderCharts(st) {
   const ownRows = st.channels.filter((r) => r.own_band);
   const ownSpans = mergeSpans(ownRows.map((r) => [r.freq - 10, r.freq + 10]));
@@ -631,9 +790,9 @@ function renderCharts(st) {
   const ownBand = bandOf(st.own.freq);
   const common = { selected: selSet(), strong: st.thresholds.strong_rssi_dbm };
   const solo = ui.bandView !== "all";
-  for (let [band, el, hgt, ml] of [["6", "chart6", 300, 14], ["5", "chart5", 150, 5], ["2.4", "chart24", 150, 4]]) {
+  for (let [band, el, hgt, ml] of [["6", "chart6", ui.split.h6, 14], ["5", "chart5", ui.split.h5, 5], ["2.4", "chart24", ui.split.h5, 4]]) {
     if (solo && band !== ui.bandView) continue; // 隠しているグラフは描かない
-    if (solo) { hgt = soloHeight(); ml = 24; }
+    if (solo) { hgt = ui.split.hSolo ?? soloHeight(); ml = 24; }
     renderSpectrum($(el), band, {
       ...common, height: hgt, maxLabels: ml,
       // いない扱いの局はグラフに描かない（選んでいる局だけは薄く残す）。表では「いる局だけ」を外すと見える
@@ -1425,6 +1584,7 @@ function renderTab(force = false) {
 function render(st) {
   renderTop(st);
   renderCharts(st);
+  positionSplitters();
   renderAlerts(st);
   renderOwnTile(st);
   renderSuggestions(st);
@@ -1483,6 +1643,15 @@ function init() {
   });
   buildViewbar();
   applyBandView();
+  applySplit();
+  buildSplitters();
+  $("segclock").addEventListener("click", () => {
+    ui.clockMetric = CLOCK_METRICS[(CLOCK_METRICS.indexOf(ui.clockMetric) + 1) % CLOCK_METRICS.length];
+    prefs.set("clockMetric", ui.clockMetric);
+    renderClock();
+  });
+  renderClock();
+  setInterval(renderClock, 1000);
   let rt = null;
   addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => ui.state && render(ui.state), 150); });
   setTab(ui.tab);
