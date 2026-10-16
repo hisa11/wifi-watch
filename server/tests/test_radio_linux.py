@@ -333,3 +333,36 @@ def test_chancheck_tells_stuck_radio_from_mislabeled_radiotap(sysnet, capsys):
     stuck = _chancheck(sysnet, [build.radiotap(F("5g48"), signal=-50) + ap48] * 3, capsys)
     assert "A：chが変わっていない" in stuck
     assert "何も受からない" in _chancheck(sysnet, [], capsys)
+
+
+def test_separate_monitor_vif(sysnet):
+    # rtw89（開発PCのRTL8852BE）は、IFそのものをモニタにすると前の接続のchから動かない。
+    # 別のモニタ用IFを作ると全部のchで受かった（2026-10-16 の実機の確認）。そのやり方
+    run = FakeRunner()
+    a, feed = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+    a.setblocking(False)
+    r = LinuxRadio("wlan0", RealClock(), runner=run, socket_factory=lambda: a, sys_class_net=str(sysnet),
+                   monitor_vif="wwmon0")
+    assert r.capture_if == "wwmon0"
+    r.set_monitor()
+    assert run.calls == [["ip", "link", "set", "wlan0", "down"],
+                         ["iw", "phy", "phy0", "interface", "add", "wwmon0", "type", "monitor"],
+                         ["ip", "link", "set", "wwmon0", "up"]]
+    run.calls.clear()
+    r.tune(validate_tuning(F("2g6"), 20, F("2g6")))
+    assert run.calls[0][:3] == ["iw", "dev", "wwmon0"]  # chの切り替えはモニタ用IFで
+    good = build.radiotap(F("2g6"), signal=-50) + build.beacon("02:00:00:00:00:01", build.ap_ies(F("2g6"), 20, "A", standard="n"))
+    feed.send(good)
+    assert r.capture(0.1).frames == [good]
+    # 管理モードのスキャン（起動時・復旧時）の前に、モニタ用IFを消す（このあと set_monitor で作り直す）
+    (sysnet / "wwmon0").mkdir()
+    run.calls.clear()
+    r.managed_scan()
+    assert run.calls[:2] == [["ip", "link", "set", "wwmon0", "down"], ["iw", "dev", "wwmon0", "del"]]
+    assert ["iw", "dev", "wlan0", "scan", "passive"] in run.calls
+    run.calls.clear()
+    r.reset_monitor()  # 復旧：作り直す
+    assert ["iw", "dev", "wwmon0", "del"] in run.calls
+    assert run.calls[-1] == ["ip", "link", "set", "wwmon0", "up"]
+    with pytest.raises(RadioError):
+        LinuxRadio("wlan0", RealClock(), runner=run, sys_class_net=str(sysnet), monitor_vif="wlan0")

@@ -212,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-uid", type=int, action="append", default=None)
     ap.add_argument("--monitor-flag", action="append", default=[], choices=["fcsfail", "control", "otherbss"])
     ap.add_argument("--no-setup", action="store_true", help="起動時にモニタモードへ切り替えない")
+    ap.add_argument("--monitor-vif", default=None,
+                    help="別のモニタ用IF（例：wwmon0）を作って受ける。IFそのものをモニタにするとchが変わらない無線（rtw89）向け")
     ap.add_argument("--scan-only", action="store_true",
                     help="合否ゲートが不合格のとき：管理モードのパッシブスキャンで動く（ビーコンから分かる機能だけ）")
     args = ap.parse_args(argv)
@@ -222,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         radio: LinuxRadio = ScanOnlyRadio(args.interface)
         log.warning("スキャンだけのモードで動きます（活動量・リトライ率・deauth・160MHz受信は使えません）")
     else:
-        radio = LinuxRadio(args.interface, monitor_flags=args.monitor_flag)
+        radio = LinuxRadio(args.interface, monitor_flags=args.monitor_flag, monitor_vif=args.monitor_vif)
     try:
         radio.load_hw_freqs()
         if radio.unreceivable:

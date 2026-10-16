@@ -121,8 +121,15 @@ def parse_phy_freqs(out: str) -> dict[int, bool]:
 class LinuxRadio(Radio):
     def __init__(self, ifname: str, clock: Clock | None = None, runner: Runner = subprocess_runner,
                  monitor_flags: Sequence[str] = (), socket_factory: Callable[[], socket.socket] | None = None,
-                 sys_class_net: str = "/sys/class/net"):
+                 sys_class_net: str = "/sys/class/net", monitor_vif: str | None = None):
         self.ifname = validate_ifname(ifname)
+        # 別のモニタ用IF（例：wwmon0）で受けるか。None なら ifname そのものをモニタにする（AX210の既定）。
+        # rtw89（開発PCのRTL8852BE）は、つないでいたIFをそのままモニタにすると前の接続のchから動かない
+        # （iw は合わせたと表示するのに、そのch以外は何も受からない。2026-10-16 に実機で確かめた）。
+        # 同じ無線に別のモニタ用IFを作ると、chを正しく変えて受けられる。
+        self.monitor_vif = validate_ifname(monitor_vif) if monitor_vif else None
+        if self.monitor_vif == self.ifname:
+            raise RadioError("monitor_vif は ifname と別の名前にしてください")
         self.clock = clock or RealClock()
         self.run = runner
         bad = [f for f in monitor_flags if f not in MONITOR_FLAGS]
@@ -151,7 +158,7 @@ class LinuxRadio(Radio):
         s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_ALL))
         bpf.attach(s)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
-        s.bind((self.ifname, 0))
+        s.bind((self.capture_if, 0))
         s.setblocking(False)
         return s
 
@@ -180,6 +187,11 @@ class LinuxRadio(Radio):
                 return
             except OSError:
                 return
+
+    @property
+    def capture_if(self) -> str:
+        """受信とchの切り替えに使うIF。"""
+        return self.monitor_vif or self.ifname
 
     def phy(self) -> str | None:
         p = self.sys_class_net / self.ifname / "phy80211" / "name"
@@ -214,7 +226,7 @@ class LinuxRadio(Radio):
             self.unreceivable_tuned = True
             return
         self.unreceivable_tuned = False
-        cands = tune_argvs(self.ifname, tuning)
+        cands = tune_argvs(self.capture_if, tuning)
         order = list(range(len(cands)))
         first = self.tune_style.get(tuning.width)
         if first is not None:
@@ -276,17 +288,37 @@ class LinuxRadio(Radio):
         return FrameBatch(self.tuning, t_start, self.clock.monotonic(), frames)
 
     def survey(self) -> list[SurveyEntry] | None:
-        r = self._cmd(["iw", "dev", self.ifname, "survey", "dump"], 3.0, check=False)
+        r = self._cmd(["iw", "dev", self.capture_if, "survey", "dump"], 3.0, check=False)
         if r.rc != 0:
             return None
         return parse_survey(r.out)
 
     # ------------------------------------------------------------ モードと復旧
-    def _link(self, up: bool) -> None:
-        self._cmd(["ip", "link", "set", self.ifname, "up" if up else "down"])
+    def _link(self, up: bool, dev: str | None = None) -> None:
+        self._cmd(["ip", "link", "set", dev or self.ifname, "up" if up else "down"])
+
+    def _drop_vif(self) -> None:
+        """別のモニタ用IFがあれば消す。"""
+        if self.monitor_vif and (self.sys_class_net / self.monitor_vif).exists():
+            self._link(False, self.monitor_vif)
+            self._cmd(["iw", "dev", self.monitor_vif, "del"])
 
     def set_monitor(self) -> None:
         self._close_sock()
+        if self.monitor_vif:
+            # つないでいたIFは下げて（管理モードのまま）、同じ無線に別のモニタ用IFを作り直して受ける
+            phy = self.phy()
+            if not phy or not re.match(r"^phy\d+$", phy):
+                raise RadioError(f"{self.ifname} の無線（phy）が分かりません")
+            self._link(False)
+            self._drop_vif()
+            self._cmd(["iw", "phy", phy, "interface", "add", self.monitor_vif, "type", "monitor"])
+            if self.monitor_flags:
+                self._cmd(["iw", "dev", self.monitor_vif, "set", "monitor", *self.monitor_flags], check=False)
+            self._link(True, self.monitor_vif)
+            self.tuning = None
+            self._reopen()
+            return
         self._link(False)
         self._cmd(["iw", "dev", self.ifname, "set", "type", "monitor"])
         if self.monitor_flags:
@@ -322,6 +354,7 @@ class LinuxRadio(Radio):
     def managed_scan(self) -> int:
         """管理モードで1回スキャン（受信のための操作。周りの国情報で6GHzを有効にさせる）。"""
         self._close_sock()
+        self._drop_vif()  # 別のモニタ用IFで受けていたら消してからスキャンする（このあと set_monitor で作り直す）
         self._link(False)
         self._cmd(["iw", "dev", self.ifname, "set", "type", "managed"])
         self._link(True)

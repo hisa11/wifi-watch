@@ -12,6 +12,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PY="$ROOT/server/.venv/bin/python"
 CFG="${WIFIWATCH_DEVPC_CONFIG:-$ROOT/data/devpc/config.json}"
 SOCK="${WIFIWATCH_RADIOD_SOCK:-/run/wifiwatch/radiod.sock}"
+# 別のモニタ用IFで受ける。rtw89 は IF そのものをモニタにすると前の接続のchから動かない
+# （tools/devpc_monitor_check.sh で確かめた。別のモニタ用IFなら全部のchで受かる）
+MON=wwmon0
 
 if [[ ! -f "$CFG" ]]; then
   # config.example.json をもとに、この無線と radiod を使う設定を作る（gitの外）
@@ -51,6 +54,7 @@ restore() {
   [[ -n "$RPID" ]] && sudo kill "$RPID" 2>/dev/null
   [[ -n "$KEEP" ]] && kill "$KEEP" 2>/dev/null
   wait 2>/dev/null
+  [[ -d /sys/class/net/$MON ]] && sudo iw dev "$MON" del
   sudo ip link set "$IF" down
   sudo iw dev "$IF" set type managed
   sudo ip link set "$IF" up
@@ -71,7 +75,7 @@ sleep 2  # NetworkManager が接続を切り終えるのを待つ（つながっ
 LOG="$ROOT/data/devpc/radiod.log"
 mkdir -p "$(dirname "$LOG")"
 started=$(mktemp)
-(cd "$ROOT/server" && exec sudo "$PY" -m wifiwatch.radio.radiod --interface "$IF" --socket "$SOCK" \
+(cd "$ROOT/server" && exec sudo "$PY" -m wifiwatch.radio.radiod --interface "$IF" --monitor-vif "$MON" --socket "$SOCK" \
   --group "$(id -gn)" --allow-uid "$(id -u)") >"$LOG" 2>&1 &
 RPID=$!
 # 前の起動の古いソケットではなく、今回作られたソケットを待つ

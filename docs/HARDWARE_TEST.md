@@ -35,7 +35,7 @@ sudo apt install iw
 cd ~/wifi-watch && tools/devpc_monitor.sh wlo1
 ```
 
-- 確認のあと、wlo1 を NetworkManager から外し、radiod（root）が管理モードでパッシブスキャン → モニタモードにし、本体を起動する。画面は http://127.0.0.1:8080 。
+- 確認のあと、wlo1 を NetworkManager から外し、radiod（root）が管理モードでパッシブスキャン → 別のモニタ用IF（wwmon0）を作って受け、本体を起動する。画面は http://127.0.0.1:8080 。rtw89 は wlo1 そのものをモニタにするとchが変わらないため（`tools/devpc_monitor_check.sh` で確かめた）。
 - Ctrl-C で止めると、管理モードに戻して NetworkManager に返す（つなぎ直す）。動いている間は、Claude などネットを使うアプリも止まる。
 - 巡回を速くするなら、画面でモードを PRE（下見）にする（LIVEは時間の大半を自ブロックの6GHzに使うが、この無線では合わせないので空振りになる）。
 - 万一Wi-Fiが戻らないとき：`sudo ip link set wlo1 down && sudo iw dev wlo1 set type managed && sudo ip link set wlo1 up && sudo nmcli device set wlo1 managed yes`
