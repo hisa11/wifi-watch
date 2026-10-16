@@ -194,7 +194,7 @@ body.stale .layout { opacity: 0.6; }
 .lower { grid-area: lower; }
 @media (max-width: 1200px) {
   .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "six" "side" "five" "two4" "lower"; }
-  .segclock { align-self: center; max-width: 260px; }
+  .segclock { align-self: center; max-width: 420px; }
 }
 /* 1つの帯域だけ表示：ほかを隠し、選んだ帯域を6GHzの場所（横2列）に大きく描く */
 .viewbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px 0; font-size: 12px; color: var(--ink-2); }
@@ -477,5 +477,5 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 body.resizing, body.resizing * { user-select: none; cursor: inherit; }
 
 /* 7セグメントの時計（segclock.js） */
-.segclock { padding: 6px; background: #000; border-color: #000; width: 100%; }
-.segclock-svg { display: block; width: 100%; max-width: 240px; height: auto; margin: 0 auto; cursor: pointer; }
+.segclock { padding: 0; background: #000; border-color: #000; width: 100%; overflow: hidden; }
+.segclock-svg { display: block; width: 100%; height: auto; cursor: pointer; }
