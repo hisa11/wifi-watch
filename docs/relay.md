@@ -114,8 +114,16 @@ PCの `config.json` に `"relay": {"url": "http://127.0.0.1:8787", "pc_token": "
    ```
 6. **デプロイ**して、本番のドメイン（例：`https://wifiwatch-relay.vercel.app`）を控える。
 7. **Deployment Protection**（2026-10-15確認）：既定の Standard Protection は「本番ドメイン以外」を守る。アプリとPCには**本番ドメイン**を設定する（デプロイごとに作られるURLは保護されて届かない）。「All Deployments」にすると本番ドメインも守られ、アプリもPCも届かなくなるので選ばない。
-8. **設定**：PCの `config.json` に `relay.url`（本番ドメイン）と `relay.pc_token`。アプリの設定画面に中継のURLとアプリ用のトークン。
+8. **設定**：PCの `config.json` に `relay.url`（本番ドメイン）と `relay.pc_token`。トークンを画面に出さずに入れる道具がある（開発PCの start.sh の scan・monitor は `data/devpc/config.json`、fake と本番は `config.json`）。アプリの設定画面に中継のURLとアプリ用のトークン。
+   ```bash
+   server/.venv/bin/python tools/set_relay.py data/devpc/config.json
+   ```
 9. **確かめる**：トークンなしで `curl -X POST https://…/api/app/poll` が401になること。アプリを開いて、PCの画面の右上が「中継 アプリ表示中」になること（10秒以内）。
+
+## デプロイした中継（2026-10-17）
+
+- 本番のドメイン：`https://wifiwatch-relay.vercel.app`（プロジェクト `wifiwatch-relay`、Hobby）。Upstash for Redis は無料のプラン（`wifi-Relay-DB`）。
+- 外から確かめたこと（トークンは使わない）：トークンなしの `POST /api/app/poll`・`POST /api/pc/sync`・`GET /api/app/records`・存在しない口はすべて401（「トークンがないか、違います」）。違うトークンも401。`/package.json`・`/src/routes.ts`・`/` は404（ソースは見えない）、`/robots.txt` だけ200。デプロイごとのURLは302（Vercelのログインへ。Standard Protection）。関数は東京（`x-vercel-id` に `hnd1`）で動いている。
 
 ## 確かめたこと（2026-10-15）
 
