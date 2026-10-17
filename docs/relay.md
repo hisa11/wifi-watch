@@ -107,7 +107,7 @@ PCの `config.json` に `"relay": {"url": "http://127.0.0.1:8787", "pc_token": "
 1. **Vercelのプロジェクト**：GitHubなどから取り込むか `vercel` CLIで、ルートディレクトリを `relay/` にしたプロジェクトを作る（フレームワークは「Other」）。プランはHobby。
 2. **リージョン**：`relay/vercel.json` の `"regions": ["hnd1"]`（東京）で関数を動かす。Hobbyでも1リージョンなら選べる。
 3. **Upstash**：Vercelのダッシュボードの Storage（Marketplace）から Upstash for Redis を作り、このプロジェクトにつなぐ。プランは無料、リージョンは東京（`ap-northeast-1`）を選べれば選ぶ（無料で選べるかは未確認）。
-4. **環境変数の名前を確かめる**：つないだあと、プロジェクトの Settings → Environment Variables に入った名前を見る。`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` か `KV_REST_API_URL`/`KV_REST_API_TOKEN` のどちらか（中継はどちらでも読む）。違う名前なら知らせてください。
+4. **環境変数の名前を確かめる**：つないだあと、`vercel env ls`（または Settings → Environment Variables）で名前を見る。2026-10-17 に実際につないだときは `KV_REST_API_URL`/`KV_REST_API_TOKEN`（ほかに `KV_REST_API_READ_ONLY_TOKEN`・`KV_URL`・`REDIS_URL`）が入った。中継は `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` と `KV_REST_API_URL`/`KV_REST_API_TOKEN` のどちらでも読む。
 5. **トークン**：`APP_TOKEN` と `PC_TOKEN` を別々の32文字以上の乱数で作り、Production（と使うならPreview）の環境変数に置く。リポジトリには書かない。
    ```bash
    python3 -c "import secrets; print(secrets.token_urlsafe(32))"
