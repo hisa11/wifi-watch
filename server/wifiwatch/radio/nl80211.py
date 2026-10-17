@@ -107,7 +107,9 @@ def bss_from_attrs(a: dict[int, bytes]) -> ScanBss | None:
     sig = None
     if NL80211_BSS_SIGNAL_MBM in b:
         (mbm,) = struct.unpack("=i", b[NL80211_BSS_SIGNAL_MBM][:4])
-        sig = mbm / 100.0
+        # 0 dBm 以上は「測っていない」として扱う。rtw89 は強さを測れないとき 0.00 dBm を返す（2026-10-17、開発PCで
+        # 全部の局が 0 dBm になった）。そのまま使うと全部が「強い局」になり、強い局の警報が誤って出る
+        sig = mbm / 100.0 if mbm < 0 else None
     seen = None
     if NL80211_BSS_SEEN_MS_AGO in b:
         (seen,) = struct.unpack("=I", b[NL80211_BSS_SEEN_MS_AGO][:4])

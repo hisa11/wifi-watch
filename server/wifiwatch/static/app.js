@@ -269,6 +269,8 @@ function channelNode(row, nStations) {
   return [out];
 }
 
+const UNKNOWN_RSSI_Y = -88; // 強さ不明の局を描く高さ（点線。強さの目安ではない）
+
 function renderSpectrum(container, band, opt) {
   const { stations, channels, selected = null, height = 300, maxLabels = 14, rows = true, ownSpans = [], blockSpan = null, strong = -70, interactive = true } = opt;
   const W = Math.max(320, container.clientWidth || 800);
@@ -318,6 +320,12 @@ function renderSpectrum(container, band, opt) {
     }
   }
   svg.append(s("line", { class: "axisline", x1: L, x2: W - R, y1: xb, y2: xb }));
+  // 強さ不明の局があれば、そう添える（強い・弱いを見せられない理由）
+  const nUnknown = stations.filter((q) => q.present && q.rssi == null).length;
+  if (nUnknown) {
+    svg.append(s("text", { class: "unknown-note", x: L + 4, y: T + 12,
+      text: `強さ不明 ${nUnknown}局（点線）：無線が強さを返していません` }));
+  }
   // 「強い」の目安
   svg.append(s("line", { class: "thresh", x1: L, x2: W - R, y1: y(strong), y2: y(strong) }));
   svg.append(s("text", { class: "thresh-label", x: W - R - 2, y: y(strong) - 3, "text-anchor": "end", text: `強い ${strong}dBm` }));
@@ -329,10 +337,10 @@ function renderSpectrum(container, band, opt) {
   const ordered = [...stations].sort((p, q) => isChosen(p.bssid) - isChosen(q.bssid) || (p.rssi ?? -200) - (q.rssi ?? -200));
   const geo = [];
   for (const st of ordered) {
-    if (st.rssi == null) continue;
     const k = kindOf(st.kind);
-    const yt = y(st.rssi);
+    const yt = y(st.rssi ?? UNKNOWN_RSSI_Y);
     const cls = ["st-shape", k.cls];
+    if (st.rssi == null) cls.push("unknown"); // 強さ不明（無線が強さを返さない）：低い点線で描く
     if (st.alerts.length) cls.push("alerting");
     if (!st.present) cls.push("gone");
     if (anySel && !isChosen(st.bssid)) cls.push("dim");
@@ -350,8 +358,8 @@ function renderSpectrum(container, band, opt) {
   // 選んで付ける名前（全部には付けない）
   const placed = [];
   const prio = (st) => (isChosen(st.bssid) ? 0 : st.alerts.length ? 1 : st.kind === "own" ? 2 : st.new ? 3 : 4);
-  const cands = [...stations].filter((q) => q.rssi != null && q.present)
-    .sort((p, q) => prio(p) - prio(q) || q.rssi - p.rssi);
+  const cands = [...stations].filter((q) => q.present)
+    .sort((p, q) => prio(p) - prio(q) || (q.rssi ?? -200) - (p.rssi ?? -200));
   let nLabels = 0;
   const labeled = new Set();
   for (const st of cands) {
@@ -360,7 +368,7 @@ function renderSpectrum(container, band, opt) {
     if (labeled.has(keyName) && prio(st) >= 4) continue; // 同じ名前は1回だけ（RoboconFreeの乱立など）
     const [lo, hi] = st.spans[0];
     let cx = (x(lo) + x(hi)) / 2;
-    const yt = y(st.rssi);
+    const yt = y(st.rssi ?? UNKNOWN_RSSI_Y);
     let label = ssidText(st);
     if (label.length > 18) label = label.slice(0, 17) + "…";
     if (st.new) label += " NEW";

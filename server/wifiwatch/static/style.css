@@ -246,6 +246,8 @@ body.stale .layout { opacity: 0.6; }
 .st-shape.alerting { stroke-width: 3; }
 .st-shape.dim { opacity: 0.18; }
 .st-shape.gone { opacity: 0.30; }
+.st-shape.unknown { stroke-dasharray: 5 4; fill-opacity: 0.03; }
+.unknown-note { font-size: 11px; fill: var(--warn); }
 .st-shape.selected { stroke-width: 3.5; fill-opacity: 0.22; }
 .st-label { fill: var(--ink); font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
 .st-label.sub { fill: var(--ink-2); font-weight: 400; font-size: 10px; }

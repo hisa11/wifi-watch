@@ -35,6 +35,14 @@ def test_parse_scan_dump_messages():
     assert got[1].freq == 5180 and got[1].ies == b""
 
 
+def test_zero_signal_means_not_measured():
+    # rtw89 は強さを測れないとき 0.00 dBm を返す。0 dBm 以上は「強さ不明」にして、強い局に数えない
+    data = bss_msg("02:00:00:00:00:01", 5180, 0, b"") + bss_msg("02:00:00:00:00:02", 5180, 1700, b"", 2)
+    data += bss_msg("02:00:00:00:00:03", 5180, -100, b"", 3)
+    got = [nl.bss_from_attrs(nl.attrs(body)) for t, body in nl.parse_messages(data) if t != nl.NLMSG_DONE]
+    assert [g.signal_dbm for g in got] == [None, None, -1.0]
+
+
 def test_netlink_error_raises():
     err = struct.pack("=IHHII", 36, nl.NLMSG_ERROR, 0, 1, 0) + struct.pack("=i", -1) + b"\x00" * 16
     try:
