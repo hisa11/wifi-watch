@@ -6,6 +6,9 @@ relay/.env.local
 relay/.env*.local
 relay/.vercel/
 *.secret
+# プッシュ通知（FCM）：アプリの設定ファイル（公開のリポジトリなので入れない）と、PCに置く鍵
+android/app/google-services.json
+*firebase-adminsdk*.json
 # Python
 server/.venv/
 __pycache__/

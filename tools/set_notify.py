@@ -1,4 +1,11 @@
-"""PCの config.json に、スマホへの通知（ntfy）の宛先を入れる。試しに1件送ることもできる。
+"""PCの config.json に、スマホへの通知の宛先を入れる。試しに1件送ることもできる。
+
+wifiwatch のアプリへのプッシュ通知（FCM）：
+  server/.venv/bin/python tools/set_notify.py data/devpc/config.json --fcm-key ~/Downloads/xxx-firebase-adminsdk-xxx.json
+      Firebase のサービスアカウントの鍵（JSON。秘密）を data/secrets/ に写して（権限600）、config.json に場所を入れる
+  server/.venv/bin/python tools/set_notify.py data/devpc/config.json --fcm-test    # アプリに試しに1件送る（警告と同じ）
+
+ntfy のアプリへの通知：
 
 ntfy のトピックは「知っている人なら誰でも読める」名前なので、推測されにくい乱数で作る（スマホで打ちやすいよう、
 l・1・o・0・i を除いた小文字と数字）。config.json は自分だけが読める権限（600）にして、コミットしない。
@@ -46,6 +53,8 @@ def main() -> int:
     ap.add_argument("--test", action="store_true", help="試しに1件送る（書きかえない）")
     ap.add_argument("--off", action="store_true", help="通知をやめる（トピックを消す）")
     ap.add_argument("--server", default=None, help="ntfy のサーバ（既定 https://ntfy.sh）")
+    ap.add_argument("--fcm-key", default=None, help="Firebase のサービスアカウントの鍵（JSON）を取り込む")
+    ap.add_argument("--fcm-test", action="store_true", help="wifiwatch のアプリに試しに1件送る")
     a = ap.parse_args()
 
     path = Path(a.config)
@@ -55,6 +64,9 @@ def main() -> int:
     data = json.loads(path.read_text(encoding="utf-8"))
     notify = dict(data.get("notify") or {})
     server = a.server or notify.get("ntfy_server") or "https://ntfy.sh"
+
+    if a.fcm_key or a.fcm_test:
+        return fcm_main(a, path, data, notify)
 
     if a.test:
         topic = notify.get("ntfy_topic")
@@ -100,6 +112,53 @@ def main() -> int:
        server/.venv/bin/python tools/set_notify.py {a.config} --test
 
 トピックは「知っている人なら誰でも読める」名前です。人に見せたり、コミットしたりしないでください。""")
+    return 0
+
+
+def fcm_main(a: argparse.Namespace, path: Path, data: dict, notify: dict) -> int:
+    from wifiwatch import fcm
+    if a.fcm_key:
+        src = Path(a.fcm_key).expanduser()
+        try:
+            key = json.loads(src.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            print(f"鍵を読めません：{e}")
+            return 1
+        if key.get("type") != "service_account" or not key.get("private_key") or not key.get("project_id"):
+            print("Firebase のサービスアカウントの鍵（JSON）ではありません（「新しい秘密鍵を生成」でダウンロードしたものを指定）")
+            return 1
+        dst = ROOT / "data" / "secrets" / "fcm-service-account.json"  # data/ はgitの外
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(dst.parent, 0o700)
+        fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(key, f)
+        os.chmod(dst, 0o600)
+        notify["fcm_service_account"] = str(dst)
+        data["notify"] = notify
+        try:
+            parse_config(data)
+            fcm.FcmSender(str(dst))
+        except (ConfigError, ValueError) as e:
+            print(e)
+            return 1
+        atomic_write_json(path, data)
+        os.chmod(path, 0o600)
+        print(f"鍵を {dst} に写し（権限600）、{path} に入れました（プロジェクト {key['project_id']}）。PCを起動し直すと効きます。")
+        print(f"ダウンロードした元の鍵（{src}）は、もう要らないので消してかまいません。")
+        return 0
+    kp = notify.get("fcm_service_account")
+    if not kp:
+        print("まだ鍵がありません。先に --fcm-key で取り込んでください")
+        return 1
+    try:
+        sender = fcm.FcmSender(kp, float(notify.get("timeout_s", 10)))
+        sender.send(fcm.message(notify.get("fcm_topic") or "wifiwatch-alerts", "warn", "info", "wifiwatch・通知のテスト",
+                                "PCからアプリへの通知が届きました（警告と同じ：音・バイブ・画面の上）。", "test"))
+    except Exception as e:
+        print(f"送れませんでした：{e}")
+        return 1
+    print("送りました。アプリを一度開いたスマホに、音とバイブで届けば設定はできています（届くまで数秒〜数十秒）")
     return 0
 
 

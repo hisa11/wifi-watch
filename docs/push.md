@@ -1,0 +1,50 @@
+# 警報のプッシュ通知（wifiwatch のアプリ、FCM）
+
+PC が警報を出すと、Firebase Cloud Messaging（FCM）を通して wifiwatch のアプリに通知を送る。アプリを閉じていても、
+通知欄に出て、音とバイブで知らせる（緊急・警告）。中継（Vercel）は通さないので、中継が止まっていても届く。
+ntfy・Discord への通知（ほかの部員のスマホ向け）は今までどおり送る。
+
+```
+PC ──（サービスアカウントの鍵で署名）──▶ FCM（Google） ──▶ wifiwatch のアプリ（トピック wifiwatch-alerts に登録）
+```
+
+| PCの警報 | アプリの通知チャネル | 鳴り方 |
+| --- | --- | --- |
+| 緊急（crit） | 緊急の警報 | 音・長いバイブ（0.9秒×3）・画面の上に出る |
+| 警告（warn） | 警告 | 音・バイブ（0.6秒×2）・画面の上に出る |
+| お知らせ（自chを自APに合わせた、など） | お知らせ | 短い音とバイブ |
+| 解消 | 解消 | 音なし（同じ警報の通知を置き換える） |
+
+鳴り方は Android の設定（アプリの「鳴り方を変える」）で部員ごとに変えられる。15分ごとの「稼働中」は送らない。
+
+## 用意する（はじめの1回、10分ほど）
+
+Firebase の無料のプラン（Spark）で足りる。FCM の送信に料金はかからない。
+
+1. https://console.firebase.google.com で「プロジェクトを作成」（名前は例：`wifiwatch`。Google アナリティクスは要らない）。
+2. プロジェクトの画面で Android のアイコン（「アプリを追加」）を押し、**Android パッケージ名に `jp.robocon.wifiwatch`** を入れて登録する。
+   ニックネーム・SHA-1 は空でよい。
+3. `google-services.json` をダウンロードして、`android/app/google-services.json` に置く（コミットしない。`.gitignore` 済み）。
+   「Firebase SDK の追加」の手順は飛ばしてよい（このリポジトリに入れてある）。
+4. 歯車 →「プロジェクトの設定」→「サービス アカウント」→「新しい秘密鍵を生成」で鍵（JSON）をダウンロードする。**これは秘密**。
+5. PC で鍵を取り込む（`data/secrets/` に写して権限600にし、config.json に場所を入れる。ダウンロードした元の鍵は消してよい）。
+   ```bash
+   server/.venv/bin/python tools/set_notify.py data/devpc/config.json --fcm-key ~/Downloads/鍵のファイル名.json
+   ```
+   （start.sh の scan・monitor は `data/devpc/config.json`、fake と本番は `config.json`）
+6. アプリを組み立て直してスマホに入れ（Android Studio の ▶ か `./gradlew installDebug`）、**一度開く**。
+   通知の許可を聞かれたら「許可」。設定の画面の「警報の通知（プッシュ）」が「受け取り中」になればよい。
+7. PC を起動し直し、試しに1件送る。スマホが鳴ってバイブすれば完了（アプリは閉じていてよい）。
+   ```bash
+   server/.venv/bin/python tools/set_notify.py data/devpc/config.json --fcm-test
+   ```
+
+部員のスマホを増やすときは、同じ `google-services.json` で組み立てたアプリを入れて一度開くだけ。
+
+## うまくいかないとき
+
+- アプリの設定が「未設定」：`android/app/google-services.json` が無いまま組み立てた。置いてから組み立て直す。
+- 「登録できません」：Google Play 開発者サービスが無い・古い端末。モバイル回線か Wi-Fi でインターネットにつながっているか。
+- PC の `--fcm-test` が「トークン：HTTP 400/401」：鍵が違う・消された。Firebase で鍵を作り直して `--fcm-key` で取り込み直す。
+- 届くが鳴らない：Android の設定で、そのチャネル（警告・緊急の警報）の音やバイブがオフになっていないか。マナーモード・おやすみモード。
+- 遅れる：省電力の設定で wifiwatch が制限されていないか（緊急・警告は優先度高で送るので、スマホが休んでいても起こす）。

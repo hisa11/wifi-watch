@@ -2,6 +2,7 @@
 
   crit  ntfy（優先度5）とDiscordの両方      warn  ntfy（優先度4）
   解消  ntfy（優先度2）                     稼働中  ntfy（優先度1、起動時と15分ごと）
+  wifiwatch のアプリ（FCM、鍵があるとき）：crit・warn・解消・お知らせ（稼働中は送らない）。音とバイブはアプリの通知チャネル
 
 - 送るものはまずSQLiteの待ち行列に入れる（再起動しても消えない）。回線が切れている間も
   crit と warn は戻るまで無期限に再送する（待つ間隔は最大60秒）。稼働中の通知は15分で捨てる。
@@ -19,6 +20,7 @@ from typing import Any, Callable, Protocol
 
 from .analyzer.alerts import AlertEvent
 from .clock import Clock, jst_str
+from . import fcm
 from .config import NotifyConfig
 from .store import Store
 
@@ -110,7 +112,8 @@ class Buzzer:
 
 class Notifier:
     def __init__(self, cfg: NotifyConfig, store: Store, clock: Clock, poster: Poster | None = None,
-                 buzzer: Buzzer | None = None, status: Callable[[], dict[str, Any]] | None = None):
+                 buzzer: Buzzer | None = None, status: Callable[[], dict[str, Any]] | None = None,
+                 fcm_sender: "fcm.FcmSender | None" = None):
         self.cfg = cfg
         self.store = store
         self.clock = clock
@@ -126,6 +129,14 @@ class Notifier:
         self.last_ok: dict[str, float] = {}
         self.last_error: dict[str, str] = {}
         self.health_ok: bool | None = None
+        self.fcm = fcm_sender
+        self.fcm_error: str | None = None
+        if self.fcm is None and cfg.fcm_service_account:
+            try:
+                self.fcm = fcm.FcmSender(cfg.fcm_service_account, cfg.timeout_s)
+            except Exception as e:  # 鍵が読めなくても、ほかの通知と監視は止めない
+                self.fcm_error = f"FCMの鍵を読めません：{e}"
+                log.warning("fcm: %s", self.fcm_error)
 
     @property
     def ntfy_url(self) -> str:
@@ -141,6 +152,7 @@ class Notifier:
             title = f"解消｜{ev.title}"
             body = f"{ev.message}\n{when} JST"
             self._enqueue_ntfy(now, "resolved", ev.level, title, body, 2, NTFY_TAGS["resolved"])
+            self._enqueue_fcm(now, "resolved", ev.level, title, body, ev.key)
             return
         lv = LEVEL_JP.get(ev.level, ev.level)
         prefix = "追加｜" if ev.kind == "added" else ""
@@ -152,6 +164,7 @@ class Notifier:
         body = f"{detail}\n{when} JST（ピットから見えたもの）"
         prio = 5 if ev.level == "crit" else 4
         self._enqueue_ntfy(now, ev.kind, ev.level, title, body, prio, NTFY_TAGS.get(ev.level, []))
+        self._enqueue_fcm(now, ev.kind, ev.level, title, body, ev.key)
         if ev.level == "crit":
             if self.cfg.discord_webhook:
                 content = f"**🚨 {title}**\n{body}"[:1900]
@@ -165,6 +178,14 @@ class Notifier:
         now = self.clock.time()
         prio = 4 if level == "warn" else 3
         self._enqueue_ntfy(now, "info", level, title, f"{body}\n{jst_str(now)} JST", prio, NTFY_TAGS.get(level, []))
+        self._enqueue_fcm(now, "info", level, title, f"{body}\n{jst_str(now)} JST", f"info-{int(now)}")
+
+    def _enqueue_fcm(self, now: float, kind: str, level: str | None, title: str, body: str, tag: str) -> None:
+        """wifiwatch のアプリへ（鍵があるときだけ）。同じ警報は同じ tag なので、解消の通知で置き換わる。"""
+        if self.fcm is None:
+            return
+        self.store.notify_enqueue(now, "fcm", kind, level, fcm.message(self.cfg.fcm_topic, level, kind, title, body, tag))
+        self.wake.set()
 
     def _enqueue_ntfy(self, now: float, kind: str, level: str | None, title: str, body: str, prio: int,
                       tags: list[str], expires_at: float | None = None) -> None:
@@ -210,12 +231,25 @@ class Notifier:
                 blocked.add(chn)  # 先頭が待ち中なら後ろも待つ（順番を守る）
                 continue
             payload = json.loads(row["payload"])
-            url = self.ntfy_url if chn == "ntfy" else self.cfg.discord_webhook
-            if not url:
-                self.store.notify_sent(row["id"], now)
-                continue
             try:
-                self.poster.post_json(url, payload, self.cfg.timeout_s)
+                if chn == "fcm":
+                    if self.fcm is None:
+                        self.store.notify_sent(row["id"], now)
+                        continue
+                    try:
+                        self.fcm.send(payload)
+                    except fcm.FcmError as e:
+                        if e.permanent and row["attempts"] >= 2:  # 中身や鍵が悪い：3回で諦めて次へ（後ろを止めない）
+                            self.store.notify_sent(row["id"], now)
+                            self.last_error[chn] = str(e)
+                            continue
+                        raise SendError(str(e), e.retry_after) from None
+                else:
+                    url = self.ntfy_url if chn == "ntfy" else self.cfg.discord_webhook
+                    if not url:
+                        self.store.notify_sent(row["id"], now)
+                        continue
+                    self.poster.post_json(url, payload, self.cfg.timeout_s)
             except SendError as e:
                 wait = min(BACKOFF_MAX_S, 2.0 ** min(row["attempts"] + 1, 6))
                 if e.retry_after:
@@ -267,4 +301,5 @@ class Notifier:
         return {"backlog": self.store.notify_backlog(), "last_ok": self.last_ok, "last_error": self.last_error,
                 "health_ok": self.health_ok, "buzzer_error": self.buzzer.last_error,
                 "ntfy": bool(self.cfg.ntfy_topic), "discord": bool(self.cfg.discord_webhook),
-                "healthcheck": bool(self.cfg.healthcheck_url), "buzzer": bool(self.cfg.buzzer_device)}
+                "healthcheck": bool(self.cfg.healthcheck_url), "buzzer": bool(self.cfg.buzzer_device),
+                "fcm": self.fcm is not None, "fcm_error": self.fcm_error}

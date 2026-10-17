@@ -4,6 +4,7 @@ package jp.robocon.wifiwatch.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -54,6 +55,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import jp.robocon.wifiwatch.core.Channels
 import jp.robocon.wifiwatch.core.PcState
@@ -63,6 +66,7 @@ import jp.robocon.wifiwatch.core.strings
 import jp.robocon.wifiwatch.data.RecordEntity
 import jp.robocon.wifiwatch.data.cleanToken
 import jp.robocon.wifiwatch.data.tokenProblem
+import jp.robocon.wifiwatch.push.Push
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -582,6 +586,42 @@ private fun PcAnalyzer(vm: MainViewModel, bandSel: String) {
 }
 
 // ================================================================== 6. 設定
+/** 警報のプッシュ通知（FCM）の状態と確かめ。 */
+@Composable
+private fun PushSettings() {
+    val ctx = LocalContext.current
+    val w = LocalW.current
+    val push by Push.status.collectAsStateWithLifecycle()
+    // 許可は画面の外（起動時の問い合わせ・Androidの設定）でも変わるので、画面に戻るたびに確かめ直す
+    var checks by remember { mutableStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { checks++ }
+    val permitted = remember(checks) { Push.permitted(ctx) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { checks++ }
+    val openSettings = {
+        ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+    }
+    SectionTitle("警報の通知（プッシュ）")
+    Text(
+        when {
+            !push.configured -> "未設定：このアプリは Firebase の設定ファイル（google-services.json）なしで組み立てられています。"
+            push.subscribed == true -> "受け取り中：アプリを閉じていても、警告・緊急は音とバイブで通知欄に出ます。"
+            push.subscribed == false -> "登録できません：${push.error ?: "Google Play 開発者サービスを確かめてください"}"
+            else -> "登録しています…"
+        },
+        fontSize = 13.sp, color = if (push.configured && push.subscribed != false) w.ink2 else w.warnInk,
+    )
+    if (!permitted) {
+        Text("通知が許可されていないので、届いても出ません。", fontSize = 13.sp, color = w.crit)
+        Button(onClick = { if (Build.VERSION.SDK_INT >= 33) ask.launch(Manifest.permission.POST_NOTIFICATIONS) else openSettings() }) { Text("通知を許可する") }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { Push.testLocal(ctx); checks++ }) { Text("このスマホで試しに鳴らす") }
+        OutlinedButton(onClick = { openSettings() }) { Text("鳴り方を変える（Androidの設定）") }
+    }
+    Text("PCから届くかは、PCで tools/set_notify.py の --fcm-test で確かめます。", fontSize = 11.sp, color = w.ink2)
+}
+
 @Composable
 fun SettingsScreen(vm: MainViewModel, onDone: () -> Unit) {
     val s = vm.settings
@@ -629,5 +669,6 @@ fun SettingsScreen(vm: MainViewModel, onDone: () -> Unit) {
             OutlinedButton(onClick = { scope.launch { msg = vm.testConnection() } }) { Text("つないでみる") }
         }
         msg?.let { Text(it, modifier = Modifier.padding(top = 8.dp)) }
+        PushSettings()
     }
 }

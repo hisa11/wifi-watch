@@ -527,7 +527,8 @@ function renderTop(st) {
     const n = st.notify;
     const ok = n.backlog === 0;
     links.append(h("span", { title: n.last_error && Object.values(n.last_error).join(" / ") || "" },
-      h("span", { class: `dot ${!n.ntfy ? "" : ok ? "ok" : "warn"}` }), n.ntfy ? (ok ? "通知 送信済み" : `通知 未送 ${n.backlog}`) : "通知 未設定"));
+      h("span", { class: `dot ${!(n.ntfy || n.fcm) ? "" : ok && !n.fcm_error ? "ok" : "warn"}` }),
+      n.ntfy || n.fcm ? (ok ? `通知 送信済み（${[n.fcm ? "アプリ" : "", n.ntfy ? "ntfy" : ""].filter(Boolean).join("・")}）` : `通知 未送 ${n.backlog}`) : n.fcm_error ? "通知 鍵のエラー" : "通知 未設定"));
     if (n.healthcheck) links.append(h("span", null, h("span", { class: `dot ${n.health_ok ? "ok" : n.health_ok === false ? "warn" : ""}` }), "死活監視"));
   }
   const r = st.relay || {};
@@ -1648,6 +1649,7 @@ function renderSettingsLive() {
   const n = st.notify || {};
   const r = st.relay || {};
   clear($("setLinks")).append(h("dl", { class: "facts" },
+    h("dt", { text: "アプリ（FCM）" }), h("dd", { text: n.fcm ? `設定あり${n.last_error?.fcm ? `・最後の誤り：${n.last_error.fcm}` : ""}` : n.fcm_error || "未設定" }),
     h("dt", { text: "ntfy" }), h("dd", { text: n.ntfy ? `設定あり・未送 ${n.backlog}` : "未設定" }),
     h("dt", { text: "Discord" }), h("dd", { text: n.discord ? "設定あり（critだけ）" : "未設定" }),
     h("dt", { text: "死活監視" }), h("dd", { text: n.healthcheck ? (n.health_ok ? "報告できている" : "報告できていない") : "未設定" }),

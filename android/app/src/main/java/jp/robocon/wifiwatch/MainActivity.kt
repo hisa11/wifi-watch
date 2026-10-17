@@ -1,6 +1,11 @@
 package jp.robocon.wifiwatch
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -30,6 +35,7 @@ import jp.robocon.wifiwatch.ui.RecordsScreen
 import jp.robocon.wifiwatch.ui.ScanScreen
 import jp.robocon.wifiwatch.ui.SettingsScreen
 import jp.robocon.wifiwatch.ui.StatusScreen
+import jp.robocon.wifiwatch.push.Push
 import jp.robocon.wifiwatch.ui.AnalyzerScreen
 import jp.robocon.wifiwatch.ui.WifiTheme
 import jp.robocon.wifiwatch.ui.verdictOf
@@ -48,6 +54,15 @@ class MainActivity : ComponentActivity() {
                 // スマホのアナライザーも、前面にいる間はスキャンし続ける（どの画面を開いていても）
                 LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.startPolling(); vm.startPhoneScan() }
                 LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.stopPolling(); vm.stopPhoneScan() }
+                // 警報の通知の許可（Android 13以降）。はじめて開いたときに1回だけ聞く
+                val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+                LaunchedEffect(Unit) {
+                    val prefs = getSharedPreferences("push", MODE_PRIVATE)
+                    if (Build.VERSION.SDK_INT >= 33 && !Push.permitted(this@MainActivity) && !prefs.getBoolean("asked", false)) {
+                        prefs.edit().putBoolean("asked", true).apply()
+                        askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
                 var tab by rememberSaveable { mutableStateOf(if (vm.settings.configured) "status" else "settings") }
                 var openRec by rememberSaveable { mutableStateOf<String?>(null) }
                 val live by vm.live.collectAsStateWithLifecycle()

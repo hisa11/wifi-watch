@@ -95,6 +95,9 @@ class TeamConfig(_Strict):
 class NotifyConfig(_Strict):
     ntfy_server: str = "https://ntfy.sh"
     ntfy_topic: str | None = None
+    # wifiwatch のアプリへのプッシュ通知（FCM）。鍵はFirebaseのサービスアカウントのJSON（秘密。コミットしない）
+    fcm_service_account: str | None = None
+    fcm_topic: str = "wifiwatch-alerts"
     discord_webhook: str | None = None
     healthcheck_url: str | None = None
     healthcheck_interval_s: float = 60
@@ -112,6 +115,13 @@ class NotifyConfig(_Strict):
             raise ValueError("ntfy_topic は英数字と _ - だけ、64文字以内にしてください")
         if len(v) < 16:
             raise ValueError("ntfy_topic は推測されにくい16文字以上にしてください（公開トピックのため）")
+        return v
+
+    @field_validator("fcm_topic")
+    @classmethod
+    def _fcm_topic(cls, v: str) -> str:
+        if not re.match(r"^[A-Za-z0-9_.~%-]{1,200}$", v):
+            raise ValueError("fcm_topic は英数字と _ . ~ % - だけにしてください")
         return v
 
     @field_validator("ntfy_server", "discord_webhook", "healthcheck_url")

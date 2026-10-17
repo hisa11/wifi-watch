@@ -2,7 +2,12 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services) apply false
 }
+
+// プッシュ通知（FCM）の設定ファイル。Firebase のコンソールで作り、ここ（android/app/）に置く。秘密ではないが、
+// 公開のリポジトリなのでコミットしない。無ければプッシュ通知なしで組み立てる（アプリの設定に「未設定」と出る）
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
 
 android {
     namespace = "jp.robocon.wifiwatch"
@@ -54,6 +59,8 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.okhttp)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
     testImplementation(libs.json)
