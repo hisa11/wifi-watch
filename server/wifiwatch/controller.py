@@ -18,6 +18,8 @@ from typing import Any, Callable
 from . import channels as ch
 from .analyzer.alerts import AlertEvent
 from .analyzer.occupancy import OccupancyContext, channel_rows, is_present, missed_visits, present_stations, suggestions
+from .analyzer.stations import StationTable
+from .capture import ies
 from .classify import FP_RE
 from .follow import FollowDecision, OwnFollower
 from .clock import Clock, jst_str, utc_iso
@@ -580,6 +582,72 @@ class Controller:
         d["model_book"] = book.get("label") if book else None
         d["same_fp"] = sum(1 for o in self.mon.analyzer.table.all() if st.model_fp and o.model_fp == st.model_fp)
         return d
+
+    def record_for_screen(self, id_: str) -> dict[str, Any]:
+        """画面で記録を開くとき：スマホから届いた記録の局に、PCの解析での分類（自チーム・他高専など）を付ける
+        （グラフの色と記号をPCで受けた局と同じにする）。記録そのもの（正本）は変えない。"""
+        r = dict(self.get_record(id_))
+        if r.get("kind") == "walk" and any(isinstance(x, dict) and x.get("ies_hex") for x in r.get("stations") or []):
+            got = {d["bssid"]: d for d in self.record_stations(id_, [x["bssid"] for x in r["stations"] if isinstance(x, dict) and x.get("bssid")])}
+            sts = []
+            for x in r["stations"]:
+                d = got.get(str(x.get("bssid", "")).lower()) if isinstance(x, dict) else None
+                if d is not None and d.get("has_ies"):
+                    x = {**x, "kind": d.get("kind"), "team": d.get("team"), "model_guess": d.get("model_guess"),
+                         "signature": d.get("signature"), "security": d.get("security"), "hidden": d.get("hidden"),
+                         "spans": d.get("spans") or x.get("spans"), "width_label": d.get("width_label") or x.get("width_label")}
+                sts.append(x)
+            r["stations"] = sts
+        return r
+
+    def record_stations(self, rid: str, bssids: list[str]) -> list[dict[str, Any]]:
+        """記録の中の局の詳細（画面の右の「局の詳細」に出す）。スマホから届いた記録は局ごとのIEを持っているので、
+        PCが受けた局と同じ解析（IEの読み取り・RNRと並びでの紐付け・分類・機種推定）にかける。IEの無い記録
+        （PCの手動スキャン）は、記録に書いてある分類をそのまま出す。強さは記録を取ったときの値。"""
+        rec = self.store.get_record(rid)
+        if rec is None:
+            raise ControlError(404, "not_found", "その記録はありません")
+        want = [normalize_mac(b) for b in bssids[:50]]
+        sts = [x for x in rec.get("stations") or [] if isinstance(x, dict) and isinstance(x.get("bssid"), str)]
+        table = StationTable()
+        at = float(rec.get("created_at") or 0)
+        for x in sts:  # 記録の全部の局を入れる（RNR・BSSIDの並びの紐付けに、ほかの局も要る）
+            try:
+                raw = bytes.fromhex(x.get("ies_hex") or "")
+                freq = int(x.get("freq") or 0)
+            except (TypeError, ValueError):
+                continue
+            if raw and ch.band_of_freq(freq):
+                table.update_beacon(x["bssid"].lower(), freq, x.get("rssi"), ies.parse_bss(raw, 0, len(raw)), at, 0.0)
+        self.mon.classifier.classify_all(table)
+        live = self.mon.analyzer.table
+        lab = rec.get("label") or {}
+        out = []
+        for b in want:
+            x = next((q for q in sts if q["bssid"].lower() == b), None)
+            if x is None:
+                continue
+            st = table.get(b)
+            if st is not None:
+                d = st.to_dict()
+            else:  # IEの無い記録：書いてあるものだけ
+                f = int(x.get("primary_freq") or x.get("freq") or 0)
+                w = int(x.get("width") or 20)
+                d = {"bssid": b, "ssid": x.get("ssid"), "hidden": bool(x.get("hidden")), "band": x.get("band") or ch.band_of_freq(f),
+                     "freq": f, "ch": ch.freq_to_number(f), "width": w, "width_label": str(x.get("width_label") or w),
+                     "spans": x.get("spans") or [[f - w / 2, f + w / 2]], "standard": x.get("standard"), "security": x.get("security"),
+                     "pmf_required": False, "kind": x.get("kind") or "unknown", "team": x.get("team"), "team_source": None,
+                     "signature": x.get("signature"), "model_guess": x.get("model_guess") or x.get("model"), "model_fp": None,
+                     "hints": [], "linked": [], "siblings": [], "rnr": [], "dup_beacon": bool(x.get("dup_beacon")), "suspect": False}
+            book = self.mon.classifier.book.get(d.get("model_fp")) if d.get("model_fp") else None
+            d.update({"rssi": x.get("rssi"), "rssi_avg": None, "rssi_max": None, "rssi_samples": x.get("rssi_samples"),
+                      "alerts": [], "clients": [], "model_book": book.get("label") if book else None,
+                      "has_ies": st is not None, "live": live.get(b) is not None,
+                      "record": {"id": rec.get("id"), "kind": rec.get("kind"), "created_at": rec.get("created_at"),
+                                 "device": rec.get("device"), "origin": rec.get("origin"), "location": lab.get("location")}})
+            out.append(d)
+        out.sort(key=lambda d: -(d["rssi"] if isinstance(d["rssi"], (int, float)) else -200))
+        return out
 
     def clients(self) -> list[dict[str, Any]]:
         now = self.clock.time()

@@ -370,7 +370,7 @@ table.data tr { cursor: pointer; }
 table.data tr:hover td { background: var(--surface-2); }
 table.data tr.sel td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 table.data tr.gone td { color: var(--muted); }
-table.data tr.picked td { background: var(--accent-bg, rgba(57, 135, 229, 0.18)); }
+table.data tr.clickable { cursor: pointer; }
 td .rssi { display: inline-flex; align-items: center; gap: 6px; }
 td .rssi i { display: inline-block; height: 6px; border-radius: 0 3px 3px 0; background: var(--ink-2); opacity: .55; }
 .kind-cell { display: inline-flex; align-items: center; gap: 5px; }

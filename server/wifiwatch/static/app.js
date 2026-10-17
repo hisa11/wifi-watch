@@ -253,7 +253,7 @@ function overlapNode(hits, record = false) {
       h("b", { text: ssidText(st) }), h("span", { class: "r", text: `${st.rssi ?? "強さ不明"}${st.rssi != null ? "dBm" : ""}・${chLabel(st.freq)}・${st.width_label}MHz` })));
   }
   if (hits.length > 6) out.append(h("div", { class: "r", text: `ほか ${hits.length - 6}局` }));
-  out.append(h("div", { class: "r", text: record ? "クリックで下の表の行へ" : "クリックで全部の詳細" }));
+  out.append(h("div", { class: "r", text: "クリックで全部の詳細" }));
   return [out];
 }
 
@@ -271,7 +271,7 @@ function recordStationNode(st) {
   if (st.team) wrap.append(h("div", { class: "r", text: `${k.label}・${st.team}` }));
   if (st.rssi_samples > 1) wrap.append(h("div", { class: "r", text: `強さは${st.rssi_samples}回の結果の中央値` }));
   wrap.append(h("div", { class: "r", text: st.bssid }));
-  wrap.append(h("div", { class: "r", text: "記録を取ったときの値・クリックで下の表の行へ" }));
+  wrap.append(h("div", { class: "r", text: "記録を取ったときの値・クリックで詳細" }));
   return [wrap];
 }
 
@@ -442,9 +442,17 @@ function renderSpectrum(container, band, opt) {
   if (interactive) {
     const overlay = s("rect", { class: "hit", x: L, y: 0, width: W - R - L, height: totalH });
     const pick = (ev) => {
-      const pt = svg.getBoundingClientRect();
-      const sx = W / pt.width;
-      const px = (ev.clientX - pt.left) * sx, py = (ev.clientY - pt.top) * sx;
+      // 画面の位置 → グラフの中の位置。描いたときと表示の幅が違っても（中央寄せ・拡大縮小）ずれないよう、実際の変換を使う
+      const m = svg.getScreenCTM();
+      let px, py;
+      if (m) {
+        const q = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(m.inverse());
+        px = q.x; py = q.y;
+      } else {
+        const pt = svg.getBoundingClientRect();
+        const sx = W / pt.width;
+        px = (ev.clientX - pt.left) * sx; py = (ev.clientY - pt.top) * sx;
+      }
       let best = null;
       const under = new Map(); // ポインタの下にある局（台形の中か、上の辺の近く）。重なっていれば全部
       for (const gq of geo) {
@@ -942,6 +950,7 @@ function renderCalibration(st) {
 
 // ------------------------------------------------------------------ 選択と詳細
 function select(bssid) {
+  ui.recDrawer = null; // 読んでいる途中の記録の局は出さない
   ui.selected = bssid;
   ui.selectedMany = null;
   prefs.set("selected", bssid);
@@ -1008,8 +1017,11 @@ function renderDrawer() {
   drawerControls(body, d);
 }
 
-/** 局の詳細（事実・警報・手がかり・RNR）。1局のときも、重なる局を並べるときも使う。 */
-function detailNodes(d) {
+/**
+ * 局の詳細（事実・警報・手がかり・RNR）。1局のときも、重なる局を並べるときも使う。
+ * rec：記録の中の局（記録を取ったときの値。今の様子だけの行は出さない）。同じ機器の局を押すと rec.open(bssid)。
+ */
+function detailNodes(d, rec = null) {
   const k = kindOf(d.kind);
   const body = h("div");
   body.append(
@@ -1019,18 +1031,27 @@ function detailNodes(d) {
   const facts = h("dl", { class: "facts" });
   const add = (a, b) => facts.append(h("dt", { text: a }), h("dd", { text: b ?? "—" }));
   add("主ch・幅", `${chLabel(d.freq)}・${d.width_label}MHz（${spanLabel(d.spans)}）${d.dup_beacon ? "・重複ビーコン" : ""}${d.suspect ? "・IEが矛盾" : ""}`);
-  add("強さ", d.rssi_avg != null ? `平均 ${d.rssi_avg}dBm（最新 ${d.rssi}・最大 ${d.rssi_max}）` : "—");
+  if (rec) {
+    const r = d.record || {};
+    add("記録", `${r.kind === "walk" ? "スマホから送った結果" : "PCの手動スキャン"}・${dJST(r.created_at)}・${r.device || "—"}・場所 ${r.location || "—"}`);
+    add("強さ", d.rssi != null ? `${d.rssi}dBm（記録を取ったときの値${d.rssi_samples > 1 ? `・${d.rssi_samples}回の結果の中央値` : ""}）` : "強さ不明");
+  } else {
+    add("強さ", d.rssi_avg != null ? `平均 ${d.rssi_avg}dBm（最新 ${d.rssi}・最大 ${d.rssi_max}）` : "—");
+  }
   add("チーム", d.team ? `${d.team}（${{ config: "設定", tag: "手動タグ", ssid: "SSIDのパターン", rnr: "RNRで紐付け", sibling: "同じ機器（BSSIDの並び）", signature: "署名" }[d.team_source] || d.team_source}）` : "—");
   add("署名", d.signature);
   add("機種推定", d.model_guess);
   if (d.model_fp) add("指紋", `${d.model_fp}（同じ指紋の局 ${d.same_fp ?? "—"}）`);
-  add("規格・暗号", `802.11${d.standard}・${d.security}${d.pmf_required ? "（PMF必須）" : ""}`);
-  add("最終確認", `${ago(d.age_s)}（${tJST(d.last_seen)}）・${presenceText(d)}`);
-  add("初めて見た", dJST(d.first_seen));
-  add("受けたch", (d.seen_on || []).map((f) => `ch${chNum(f)}`).join("、"));
-  add("ビーコン・データ", `${d.beacons}・${d.data_frames}`);
-  if (d.moved_from) add("chの移動", `${chLabel(d.moved_from)} → ${chLabel(d.freq)}（${tJST(d.moved_at)}）`);
+  add("規格・暗号", `${d.standard ? `802.11${d.standard}` : "—"}・${d.security || "—"}${d.pmf_required ? "（PMF必須）" : ""}`);
+  if (!rec) {
+    add("最終確認", `${ago(d.age_s)}（${tJST(d.last_seen)}）・${presenceText(d)}`);
+    add("初めて見た", dJST(d.first_seen));
+    add("受けたch", (d.seen_on || []).map((f) => `ch${chNum(f)}`).join("、"));
+    add("ビーコン・データ", `${d.beacons}・${d.data_frames}`);
+    if (d.moved_from) add("chの移動", `${chLabel(d.moved_from)} → ${chLabel(d.freq)}（${tJST(d.moved_at)}）`);
+  }
   body.append(h("section", null, facts));
+  if (rec && !d.has_ies) body.append(h("p", { class: "sub", text: "この記録には局のIE（ビーコンの中身）が入っていないので、記録に書いてある分類だけを出しています。" }));
   if (d.alerts.length) {
     body.append(h("section", null, h("h3", { text: "関係する警報" }),
       ...d.alerts.map((a) => h("div", { class: `alert-card ${a.level}` }, h("div", { class: "ico", text: a.level === "crit" ? "■" : "▲" }),
@@ -1039,8 +1060,9 @@ function detailNodes(d) {
   if (d.hints.length) body.append(h("section", null, h("h3", { text: "機種推定の手がかり" }), h("ul", { class: "hints" }, ...d.hints.map((x) => h("li", { text: x })))));
   if (d.linked.length || d.rnr.length || (d.siblings || []).length) {
     const sec = h("section", null, h("h3", { text: "同じ機器（RNR・BSSIDの並び）" }));
-    for (const b of d.linked) sec.append(h("button", { class: "party", type: "button", onclick: () => select(b), text: b }));
-    for (const b of d.siblings || []) if (!d.linked.includes(b)) sec.append(h("button", { class: "party", type: "button", title: "同じchでBSSIDが並んでいる（非公開SSIDの双子など）", onclick: () => select(b), text: `${b}（並び）` }));
+    const open = (b) => (rec ? rec.open(b) : select(b));
+    for (const b of d.linked) sec.append(h("button", { class: "party", type: "button", onclick: () => open(b), text: b }));
+    for (const b of d.siblings || []) if (!d.linked.includes(b)) sec.append(h("button", { class: "party", type: "button", title: "同じchでBSSIDが並んでいる（非公開SSIDの双子など）", onclick: () => open(b), text: `${b}（並び）` }));
     for (const r of d.rnr) sec.append(h("div", { class: "sub", text: `知らせている局：${r.bssid || "（BSSIDなし）"}・${r.freq ? chLabel(r.freq) : `op${r.op_class} ch${r.channel}`}` }));
     body.append(sec);
   }
@@ -1091,6 +1113,52 @@ function drawerControls(body, d) {
     body.append(h("section", null, h("h3", { text: `端末（${d.clients.length}）` }),
       ...d.clients.slice(0, 20).map((c) => h("div", { class: "mono", text: `${c.mac}${c.random_mac ? "（ランダム）" : ""}・${c.rssi ?? "—"}dBm・${ago(ui.state.now - c.last_seen)}` }))));
   }
+}
+
+/** 記録のグラフで押した局を、右の「局の詳細」に出す（PCが受けた局と同じ解析。重なっていれば全部）。 */
+async function openRecordDrawer(rid, bssids) {
+  if (!bssids.length) return;
+  $("drawer").hidden = false;
+  // 今の局の選択を外す（2秒ごとの更新が、右の欄を今の局で上書きしないように）
+  ui.selected = null;
+  ui.selectedMany = null;
+  prefs.set("selected", null);
+  if (ui.state) renderCharts(ui.state);
+  const token = (ui.recDrawer = {});
+  try {
+    const q = bssids.map((b) => `bssid=${encodeURIComponent(b)}`).join("&");
+    const ds = await api(`/api/records/${encodeURIComponent(rid)}/stations?${q}`);
+    if (ui.recDrawer !== token) return; // 読んでいる間に別のところを押した
+    renderRecordDrawer(rid, ds);
+  } catch (e) {
+    clear($("drawerBody")).append(h("p", { text: `読めませんでした：${e.message}` }));
+  }
+}
+
+function renderRecordDrawer(rid, ds) {
+  const many = ds.length > 1;
+  $("drawerTitle").textContent = many ? `重なる局（${ds.length}）・記録` : "局の詳細（記録）";
+  const body = clear($("drawerBody"));
+  const rec = { open: (b) => openRecordDrawer(rid, [b]) };
+  if (many) {
+    const tb = h("tbody");
+    ds.forEach((d, i) => {
+      const k = kindOf(d.kind);
+      tb.append(h("tr", { onclick: () => $(`recm-${i}`).scrollIntoView({ behavior: "smooth", block: "start" }) },
+        h("td", null, h("span", { class: `glyph ${k.cls}`, text: k.glyph })),
+        h("td", { text: d.ssid || "（非公開SSID）" }),
+        h("td", { class: "num", text: d.rssi ?? "—" }),
+        h("td", { text: `ch${chNum(d.freq)}・${d.width_label}MHz` })));
+    });
+    body.append(h("table", { class: "multi-table" },
+      h("thead", null, h("tr", null, h("th", { text: "" }), h("th", { text: "SSID" }), h("th", { class: "num", text: "dBm" }), h("th", { text: "主ch・幅" }))), tb));
+  }
+  if (!ds.length) body.append(h("p", { class: "sub", text: "その局は記録にありません" }));
+  ds.forEach((d, i) => {
+    const card = h("div", { class: many ? "multi-card" : "", id: `recm-${i}` }, ...detailNodes(d, rec));
+    if (d.live) card.append(h("button", { class: "btn", type: "button", text: "PCで今見えているこの局を開く（タグを付ける）", onclick: () => select(d.bssid) }));
+    body.append(card);
+  });
 }
 
 // ------------------------------------------------------------------ 下のタブ：局
@@ -1254,13 +1322,7 @@ function renderRecordDetail() {
     rssi: x.rssi, kind: x.kind || "unknown", team: x.team, model: x.model_guess || x.model, present: true, alerts: [], age_s: 0,
     standard: x.standard, rssi_samples: x.rssi_samples || 0,
   }));
-  const rowOf = new Map();
-  const pickRows = (bssids) => {
-    for (const tr of rowOf.values()) tr.classList.remove("picked");
-    const trs = bssids.map((b) => rowOf.get(b)).filter(Boolean);
-    for (const tr of trs) tr.classList.add("picked");
-    if (trs[0]) trs[0].scrollIntoView({ block: "center", behavior: "smooth" });
-  };
+
   for (const band of ["6", "5", "2.4"]) {
     const bs = sts.filter((x) => x.band === band);
     if (!bs.length) continue;
@@ -1272,15 +1334,13 @@ function renderRecordDetail() {
     }));
     const allRows = rows.length ? rows : chRowsFor(band);
     renderSpectrum(box, band, { stations: bs, channels: allRows, selected: null, height: 140, maxLabels: 8, rows: false, interactive: true,
-      mode: "record", ptrKey: `rec-${band}`, onPick: pickRows });
+      mode: "record", ptrKey: `rec-${band}`, onPick: (bssids) => openRecordDrawer(r.id, bssids) });
   }
   const t = h("table", { class: "data" }, h("thead", null, h("tr", null, ...["SSID", "BSSID", "主ch", "幅", "強さ", "規格", "機種推定"].map((x) => h("th", { text: x })))));
   const tb = h("tbody");
   for (const x of sts.sort((a, b) => a.freq - b.freq)) {
-    const tr = h("tr", null, h("td", { text: ssidText(x) }), h("td", { class: "mono", text: x.bssid }), h("td", { class: "num", text: chLabel(x.freq) }),
-      h("td", { class: "num", text: x.width_label }), h("td", { class: "num", text: x.rssi ?? "—" }), h("td", { text: x.standard || "—" }), h("td", { text: x.model || "—" }));
-    rowOf.set(x.bssid, tr);
-    tb.append(tr);
+    tb.append(h("tr", { class: "clickable", onclick: () => openRecordDrawer(r.id, [x.bssid]) }, h("td", { text: ssidText(x) }), h("td", { class: "mono", text: x.bssid }), h("td", { class: "num", text: chLabel(x.freq) }),
+      h("td", { class: "num", text: x.width_label }), h("td", { class: "num", text: x.rssi ?? "—" }), h("td", { text: x.standard || "—" }), h("td", { text: x.model || "—" })));
   }
   t.append(tb);
   el.append(h("h3", { text: "局の一覧" }), h("div", { class: "table-wrap" }, t));

@@ -293,3 +293,23 @@ def test_store_is_safe_across_threads(tmp_path):
         t.join()
     assert not errors and st.notify_backlog() == 600
     st.close()
+
+
+def test_phone_record_stations_are_analyzed_like_pc_ones(env):
+    """スマホから届いた記録の局を押すと、PCが受けた局と同じ解析（IE・分類・手がかり）で詳細を出す。正本は変えない。"""
+    app, client, _ = env
+    rec = json.loads((ROOT / "testdata/relay/app_walk.json").read_text(encoding="utf-8"))["record"]
+    app.controller.ingest_record(rec, "app")
+    r = client.get(f"/api/records/{rec['id']}/stations", params=[("bssid", "02:A0:00:00:00:01"), ("bssid", "00:1d:73:11:22:33")])
+    assert r.status_code == 200
+    ds = r.json()
+    assert [d["bssid"] for d in ds] == ["00:1d:73:11:22:33", "02:a0:00:00:00:01"]  # 強い順。大文字のMACでも引ける
+    kosen = ds[1]
+    assert kosen["has_ies"] and kosen["kind"] == "team" and kosen["team"] == "A高専"  # IEのSSIDから、PCと同じ分類
+    assert kosen["hints"] and kosen["rssi"] == -58 and kosen["record"]["location"] == "フィールド北"
+    assert not ds[0]["has_ies"]  # IEの無い局は、書いてあるものだけ
+    # 画面で開いた記録：局に分類が付く（グラフの色と記号をPCと同じにする）。正本は変わらない
+    shown = client.get(f"/api/records/{rec['id']}").json()
+    assert next(x for x in shown["stations"] if x["bssid"] == "02:a0:00:00:00:01")["kind"] == "team"
+    assert "kind" not in next(x for x in app.store.get_record(rec["id"])["stations"] if x["bssid"] == "02:a0:00:00:00:01")
+    assert client.get("/api/records/nope/stations", params={"bssid": "02:a0:00:00:00:01"}).status_code == 404

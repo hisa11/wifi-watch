@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -130,7 +130,11 @@ def create_app(ctl: Controller, port: int) -> FastAPI:
 
     @app.get("/api/records/{rid}")
     def record(rid: str) -> Any:
-        return ctl.get_record(rid)
+        return ctl.record_for_screen(rid)
+
+    @app.get("/api/records/{rid}/stations")
+    def record_stations(rid: str, bssid: list[str] = Query(default=[])) -> Any:
+        return ctl.record_stations(rid, bssid)
 
     @app.patch("/api/records/{rid}")
     async def label(rid: str, request: Request) -> Any:
