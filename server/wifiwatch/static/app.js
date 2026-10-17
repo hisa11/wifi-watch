@@ -244,17 +244,35 @@ function stationNode(st) {
   return [wrap];
 }
 
-function overlapNode(hits) {
+function overlapNode(hits, record = false) {
   const out = h("div");
   out.append(h("div", { class: "v", text: `ここに重なる局 ${hits.length}` }));
   for (const st of hits.slice(0, 6)) {
     const k = kindOf(st.kind);
     out.append(h("div", { class: "row" }, h("span", { class: `glyph ${k.cls}`, text: k.glyph }),
-      h("b", { text: ssidText(st) }), h("span", { class: "r", text: `${st.rssi}dBm・${chLabel(st.freq)}・${st.width_label}MHz` })));
+      h("b", { text: ssidText(st) }), h("span", { class: "r", text: `${st.rssi ?? "強さ不明"}${st.rssi != null ? "dBm" : ""}・${chLabel(st.freq)}・${st.width_label}MHz` })));
   }
   if (hits.length > 6) out.append(h("div", { class: "r", text: `ほか ${hits.length - 6}局` }));
-  out.append(h("div", { class: "r", text: "クリックで全部の詳細" }));
+  out.append(h("div", { class: "r", text: record ? "クリックで下の表の行へ" : "クリックで全部の詳細" }));
   return [out];
+}
+
+/** 記録の中の局のツールチップ（記録を取ったときの値。今いるかどうかは出さない）。 */
+function recordStationNode(st) {
+  const k = kindOf(st.kind);
+  const wrap = h("div");
+  wrap.append(
+    h("div", { class: "v", text: st.rssi != null ? `${st.rssi} dBm` : "強さ不明" }),
+    h("div", { class: "row" }, h("span", { class: `glyph ${k.cls}`, text: k.glyph }), h("b", { text: ssidText(st) })),
+    h("div", { class: "r", text: `主${chLabel(st.freq)}・${st.width_label}MHz（${spanLabel(st.spans)}）` }),
+  );
+  if (st.standard) wrap.append(h("div", { class: "r", text: `規格 802.11${st.standard}` }));
+  if (st.model) wrap.append(h("div", { class: "r", text: `機種推定：${st.model}` }));
+  if (st.team) wrap.append(h("div", { class: "r", text: `${k.label}・${st.team}` }));
+  if (st.rssi_samples > 1) wrap.append(h("div", { class: "r", text: `強さは${st.rssi_samples}回の結果の中央値` }));
+  wrap.append(h("div", { class: "r", text: st.bssid }));
+  wrap.append(h("div", { class: "r", text: "記録を取ったときの値・クリックで下の表の行へ" }));
+  return [wrap];
 }
 
 function channelNode(row, nStations) {
@@ -273,6 +291,9 @@ const UNKNOWN_RSSI_Y = -88; // 強さ不明の局を描く高さ（点線。強�
 
 function renderSpectrum(container, band, opt) {
   const { stations, channels, selected = null, height = 300, maxLabels = 14, rows = true, ownSpans = [], blockSpan = null, strong = -70, interactive = true } = opt;
+  // record：記録の中の局を描く（今の様子ではない）。ツールチップは記録の中身、chの説明は出さない、押すと onPick
+  const record = opt.mode === "record";
+  const ptrKey = opt.ptrKey || band; // マウスの位置はグラフごとに覚える（今の様子と記録で混ざらないように）
   const W = Math.max(320, container.clientWidth || 800);
   const L = 40, R = 10, T = 26, H = height;
   const xb = T + H;
@@ -441,24 +462,26 @@ function renderSpectrum(container, band, opt) {
       return { best, row, hits };
     };
     const onMove = (ev) => {
-      ui.pointer[band] = { x: ev.clientX, y: ev.clientY };
+      ui.pointer[ptrKey] = { x: ev.clientX, y: ev.clientY };
       const { best, row, hits } = pick(ev);
       overlay.style.cursor = best || hits.length ? "pointer" : "crosshair";
-      if (hits.length > 1) tip.show(ev.clientX, ev.clientY, overlapNode(hits));
-      else if (best || hits.length) tip.show(ev.clientX, ev.clientY, stationNode((best && best.st) || hits[0]));
-      else if (row) tip.show(ev.clientX, ev.clientY, channelNode(row));
+      if (hits.length > 1) tip.show(ev.clientX, ev.clientY, overlapNode(hits, record));
+      else if (best || hits.length) tip.show(ev.clientX, ev.clientY, (record ? recordStationNode : stationNode)((best && best.st) || hits[0]));
+      else if (row && !record) tip.show(ev.clientX, ev.clientY, channelNode(row));
       else tip.hide();
     };
     overlay.addEventListener("pointermove", onMove);
-    overlay.addEventListener("pointerleave", () => { delete ui.pointer[band]; tip.hide(); });
+    overlay.addEventListener("pointerleave", () => { delete ui.pointer[ptrKey]; tip.hide(); });
     overlay.addEventListener("click", (ev) => {
       const { best, hits } = pick(ev);
-      if (hits.length > 1) selectMany(hits.map((q) => q.bssid));
-      else select(best ? best.st.bssid : hits.length ? hits[0].bssid : null);
+      const picked = hits.length > 1 ? hits.map((q) => q.bssid) : best ? [best.st.bssid] : hits.length ? [hits[0].bssid] : [];
+      if (record) { if (opt.onPick) opt.onPick(picked); return; } // 記録の局は今の局の詳細（引き出し）を開かない
+      if (picked.length > 1) selectMany(picked);
+      else select(picked[0] || null);
     });
     svg.append(overlay);
     svg._refreshTip = () => {
-      const p = ui.pointer[band];
+      const p = ui.pointer[ptrKey];
       if (p) onMove({ clientX: p.x, clientY: p.y });
     };
   }
@@ -1229,7 +1252,15 @@ function renderRecordDetail() {
     bssid: x.bssid, ssid: x.ssid, band: x.band || bandOf(x.freq), freq: x.freq, width: x.width || 20,
     width_label: x.width_label || String(x.width || 20), spans: x.spans || [[x.freq - (x.width || 20) / 2, x.freq + (x.width || 20) / 2]],
     rssi: x.rssi, kind: x.kind || "unknown", team: x.team, model: x.model_guess || x.model, present: true, alerts: [], age_s: 0,
+    standard: x.standard, rssi_samples: x.rssi_samples || 0,
   }));
+  const rowOf = new Map();
+  const pickRows = (bssids) => {
+    for (const tr of rowOf.values()) tr.classList.remove("picked");
+    const trs = bssids.map((b) => rowOf.get(b)).filter(Boolean);
+    for (const tr of trs) tr.classList.add("picked");
+    if (trs[0]) trs[0].scrollIntoView({ block: "center", behavior: "smooth" });
+  };
   for (const band of ["6", "5", "2.4"]) {
     const bs = sts.filter((x) => x.band === band);
     if (!bs.length) continue;
@@ -1240,13 +1271,16 @@ function renderRecordDetail() {
       n_primary: c.bss_primary ?? 0, n_strong: 0, max_rssi: c.max_rssi, rate: c.rate, reserved: [], problem: false, psc: false,
     }));
     const allRows = rows.length ? rows : chRowsFor(band);
-    renderSpectrum(box, band, { stations: bs, channels: allRows, selected: null, height: 140, maxLabels: 8, rows: false, interactive: true });
+    renderSpectrum(box, band, { stations: bs, channels: allRows, selected: null, height: 140, maxLabels: 8, rows: false, interactive: true,
+      mode: "record", ptrKey: `rec-${band}`, onPick: pickRows });
   }
   const t = h("table", { class: "data" }, h("thead", null, h("tr", null, ...["SSID", "BSSID", "主ch", "幅", "強さ", "規格", "機種推定"].map((x) => h("th", { text: x })))));
   const tb = h("tbody");
   for (const x of sts.sort((a, b) => a.freq - b.freq)) {
-    tb.append(h("tr", null, h("td", { text: ssidText(x) }), h("td", { class: "mono", text: x.bssid }), h("td", { class: "num", text: chLabel(x.freq) }),
-      h("td", { class: "num", text: x.width_label }), h("td", { class: "num", text: x.rssi ?? "—" }), h("td", { text: (r.stations.find((q) => q.bssid === x.bssid) || {}).standard || "—" }), h("td", { text: x.model || "—" })));
+    const tr = h("tr", null, h("td", { text: ssidText(x) }), h("td", { class: "mono", text: x.bssid }), h("td", { class: "num", text: chLabel(x.freq) }),
+      h("td", { class: "num", text: x.width_label }), h("td", { class: "num", text: x.rssi ?? "—" }), h("td", { text: x.standard || "—" }), h("td", { text: x.model || "—" }));
+    rowOf.set(x.bssid, tr);
+    tb.append(tr);
   }
   t.append(tb);
   el.append(h("h3", { text: "局の一覧" }), h("div", { class: "table-wrap" }, t));
