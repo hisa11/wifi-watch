@@ -1,0 +1,6 @@
+# Vercel へ上げないもの（手元の秘密・作ったもの・テスト）
+node_modules
+dist
+test
+.env*
+*.secret

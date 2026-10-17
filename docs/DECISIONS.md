@@ -19,6 +19,8 @@
 - **2026-10-14 Vercelの上限** — 要求・応答の本文は最大4.5MB（超えると413）。Hobbyの最大実行時間は300秒。メモリはHobby 2GB。関数は既定でiad1の1リージョン。Hobbyでも1リージョンなら任意に選べる（`regions`）。（vercel.com/docs/functions/limitations、…/configuring-functions/region）
 - **2026-10-14 Upstash Redisの無料プラン** — 月50万コマンド、データ250MB、帯域10GB/月、1要求10MB、1レコード100MB、DBは1つ。AUTH・PINGなどの運用コマンドは数えない。パイプライン・トランザクション・EVALの数え方は書かれていない → **使わない**。1コマンドずつ数える前提で見積もる。東京リージョンが無料で選べるかは書かれていない（未確認のまま）。（upstash.com/pricing/redis、upstash.com/docs/redis/overall/pricing）
 - **2026-10-14 MarketplaceでつないだときのUpstashの環境変数名** — ドキュメントで確認できなかった。`UPSTASH_REDIS_REST_URL`/`_TOKEN` と `KV_REST_API_URL`/`_TOKEN` の両方を読む作りにした。実際につないだときに `docs/relay.md` の手順で確かめる。
+- **2026-10-17 確かめ直し（デプロイの前）** — Hobbyでも関数のリージョンは任意の1つを選べる（`regions`、vercel.com/docs/project-configuration/vercel-ts・…/functions/configuring-functions/region）。Upstashは CLI の `vercel install upstash`（または `vercel integration add upstash`）でも作ってプロジェクトにつなげ、環境変数を `.env.local` に引いてくる（vercel.com/docs/getting-started-with-vercel、…/cli/integration）。入る環境変数の名前は今回もドキュメントに書かれていない（中継は2通りとも読む）。リポジトリにリモートが無いので、デプロイは `relay/` で Vercel CLI（50.18.0）から行う。上げないもの（node_modules・dist・test・.env*）は `relay/.vercelignore`。
+- **2026-10-17 Android Studio の版** — このプロジェクトは AGP 9.2.1。AGP 9.2 を開けるのは Android Studio Panda 4（2025.3.4）以降（developer.android.com/build/releases/about-agp の対応表）。開発PCに入っているのは 2025.3.4（ビルド 253.32098.37.2534）なので開ける。
 - **2026-10-14 @upstash/redis 1.39.0** — `automaticDeserialization: false` で値を文字列のまま扱う。
 
 ## 無線・解析

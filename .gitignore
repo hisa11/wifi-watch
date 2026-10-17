@@ -3,6 +3,7 @@
 /data/
 relay/.env
 relay/.env.local
+relay/.env*.local
 relay/.vercel/
 *.secret
 # Python
