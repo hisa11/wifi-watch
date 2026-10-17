@@ -59,6 +59,8 @@ import jp.robocon.wifiwatch.core.RecordMeta
 import jp.robocon.wifiwatch.core.StationRow
 import jp.robocon.wifiwatch.core.strings
 import jp.robocon.wifiwatch.data.RecordEntity
+import jp.robocon.wifiwatch.data.cleanToken
+import jp.robocon.wifiwatch.data.tokenProblem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -518,9 +520,10 @@ fun SettingsScreen(vm: MainViewModel, onDone: () -> Unit) {
                 val err = s.validateUrl(url)
                 if (err != null) { msg = err; return@Button }
                 s.relayUrl = url
-                if (token.isNotEmpty()) {
-                    if (token.length < 16) { msg = "トークンは16文字以上です"; return@Button }
-                    s.token = token; token = ""
+                val t = cleanToken(token) // コピーで付いた改行・空白を落とす
+                if (t.isNotEmpty()) {
+                    tokenProblem(t)?.let { msg = it; return@Button }
+                    s.token = t; token = ""
                 }
                 s.locations = locs.split('、', ',')
                 s.deviceName = device

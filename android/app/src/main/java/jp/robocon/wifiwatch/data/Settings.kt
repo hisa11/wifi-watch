@@ -13,6 +13,19 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
+ * トークンから空白・改行を取り除く。トークンに空白は入らないので、コピーで付いた改行（端末の画面から写すと末尾に付く）を落とす。
+ * 改行が残ると Authorization ヘッダに入れられず、中継に届かない（OkHttp が「Unexpected char 0x0a」で断る）。
+ */
+fun cleanToken(v: String): String = v.filterNot { it.isWhitespace() || it.isISOControl() }
+
+/** 入れられないトークンなら理由を返す（16文字以上、ヘッダに入る半角の英数字・記号だけ）。 */
+fun tokenProblem(v: String): String? = when {
+    v.length < 16 -> "トークンは16文字以上です"
+    v.any { it.code !in 0x21..0x7e } -> "トークンに使えない文字が入っています（半角の英数字と記号だけ）。全角や余計な文字が入っていないか確かめてください"
+    else -> null
+}
+
+/**
  * 設定：中継のURL、アプリ用のトークン（Android Keystoreの鍵で暗号化して保存）、場所ラベルの選択肢、端末名。
  */
 class Settings(context: Context) : jp.robocon.wifiwatch.net.RelayConfigSource {
@@ -23,8 +36,8 @@ class Settings(context: Context) : jp.robocon.wifiwatch.net.RelayConfigSource {
         set(v) = prefs.edit().putString("relay_url", v.trim().trimEnd('/')).apply()
 
     override var token: String
-        get() = prefs.getString("token_enc", null)?.let { decrypt(it) } ?: ""
-        set(v) = prefs.edit().putString("token_enc", if (v.isEmpty()) null else encrypt(v)).apply()
+        get() = prefs.getString("token_enc", null)?.let { decrypt(it) }?.let(::cleanToken) ?: "" // 前に改行ごと保存したものも使えるように
+        set(v) = cleanToken(v).let { t -> prefs.edit().putString("token_enc", if (t.isEmpty()) null else encrypt(t)).apply() }
 
     var locations: List<String>
         get() = prefs.getString("locations", null)?.let { s -> JSONArray(s).let { a -> (0 until a.length()).map { a.getString(it) } } }
