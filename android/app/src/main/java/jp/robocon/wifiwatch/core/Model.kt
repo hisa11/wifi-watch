@@ -100,6 +100,43 @@ data class PollResult(val now: Long, val state: PcState?, val stateAgeMs: Long?)
     }
 }
 
+/**
+ * PCが今見ている局（アプリが頼んだときだけ、PCが中継に置く）。形は testdata/relay/app_pcview.json。
+ * forMs：その一覧が応えた「頼んだ時刻」（中継の時計）。古い頼みへの一覧かどうかを見分ける。
+ */
+data class PcView(
+    val forMs: Long?, val receivedAtMs: Long?, val nowMs: Long, val state: PcState?, val strong: Int,
+    val stations: List<Station>, val nTotal: Int, val scanOnly: Boolean,
+) {
+    data class Station(
+        val bssid: String, val ssid: String?, val hidden: Boolean, val freq: Int, val widthLabel: String,
+        val spans: List<Channels.Span>, val rssi: Int?, val kind: String?, val team: String?, val model: String?,
+        val standard: String?, val present: Boolean, val alerting: Boolean, val ageS: Int,
+    )
+
+    companion object {
+        fun parse(o: JSONObject): PcView {
+            val v = o.optJSONObject("view")
+            val sts = v?.optJSONArray("stations").objects().map {
+                val f = it.optInt("f")
+                Station(
+                    it.optString("b"), it.optStringOrNull("s"), it.optBoolean("h"), f, it.optString("w", "20"),
+                    it.optJSONArray("sp").arrays().map { a -> Channels.Span(a.getDouble(0), a.getDouble(1)) }
+                        .ifEmpty { listOf(Channels.span20(f)) },
+                    if (it.isNull("r") || !it.has("r")) null else it.optInt("r"), it.optStringOrNull("k"), it.optStringOrNull("t"),
+                    it.optStringOrNull("m"), it.optStringOrNull("x"), it.optBoolean("p", true), it.optBoolean("a"), it.optInt("ag"),
+                )
+            }
+            return PcView(
+                if (o.isNull("for") || !o.has("for")) null else o.optLong("for"),
+                if (o.isNull("received_at") || !o.has("received_at")) null else o.optLong("received_at"),
+                o.optLong("now"), v?.optJSONObject("state")?.let { PcState.parse(it) }, v?.optInt("strong", -70) ?: -70,
+                sts, v?.optInt("n_total", sts.size) ?: 0, v?.optBoolean("scan_only") ?: false,
+            )
+        }
+    }
+}
+
 /** 記録の一覧用の情報（中継の写し）。 */
 data class RecordMeta(
     val id: String, val kind: String, val createdAt: Double, val device: String?, val origin: String?,

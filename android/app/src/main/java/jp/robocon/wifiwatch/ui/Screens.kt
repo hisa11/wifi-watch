@@ -4,6 +4,7 @@ package jp.robocon.wifiwatch.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -40,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -321,7 +323,7 @@ fun RecordsScreen(vm: MainViewModel, open: String? = null, onOpened: () -> Unit 
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Pick(kind == "", { kind = "" }, { Text("全部") })
             Pick(kind == "pc_scan", { kind = "pc_scan" }, { Text("PCの手動スキャン") })
-            Pick(kind == "walk", { kind = "walk" }, { Text("歩測") })
+            Pick(kind == "walk", { kind = "walk" }, { Text("スマホ") })
             Pick(today, { today = !today }, { Text("今日だけ") })
             for (b in listOf("6", "5", "2.4")) Pick(band == b, { band = if (band == b) "" else b }, { Text("${b}GHz") })
         }
@@ -337,7 +339,7 @@ fun RecordsScreen(vm: MainViewModel, open: String? = null, onOpened: () -> Unit 
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             items(shown, key = { it.first.id }) { (e, m) ->
                 Column(Modifier.fillMaxWidth().clickable { openId = e.id }.padding(vertical = 8.dp)) {
-                    Text("${if (m.kind == "walk") "歩測" else "手動スキャン"}・${jstOf(m.createdAt)}", fontWeight = FontWeight.SemiBold)
+                    Text("${if (m.kind == "walk") "スマホ" else "PCの手動スキャン"}・${jstOf(m.createdAt)}", fontWeight = FontWeight.SemiBold)
                     Text("${m.location ?: "場所なし"}・${m.nStations}局・${m.bands.joinToString("/") { "${it}GHz" }}・${if (m.origin == "app") "アプリ" else "画面"}から" +
                         if (e.pendingLabelJson != null) "・ラベル反映待ち" else "", fontSize = 12.sp, color = w.ink2)
                     if (m.tags.isNotEmpty()) Text(m.tags.joinToString("  ") { "#$it" }, fontSize = 12.sp, color = w.accent)
@@ -365,7 +367,7 @@ private fun RecordDetail(vm: MainViewModel, id: String, onBack: () -> Unit) {
         val meta = RecordMeta.parse(JSONObject(r.metaJson))
         val body = r.bodyJson?.let { JSONObject(it) }
         val pending = r.pendingLabelJson?.let { JSONObject(it) }
-        Text("${if (r.kind == "walk") "歩測" else "PCの手動スキャン"}・${jstOf(r.createdAt)}", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text("${if (r.kind == "walk") "スマホから送った結果" else "PCの手動スキャン"}・${jstOf(r.createdAt)}", fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Text(listOfNotNull(meta.device, if (meta.origin == "app") "アプリから" else "画面から").joinToString("・"), color = w.ink2, fontSize = 12.sp)
         SectionTitle("ラベル")
         var location by remember(r.id, r.pendingLabelJson) { mutableStateOf(pending?.optString("location")?.takeIf { it != "null" } ?: meta.location ?: "") }
@@ -411,12 +413,43 @@ private fun StationLine(ssid: String?, bssid: String, freq: Int, width: String, 
     }
 }
 
-// ================================================================== 5. 歩測
+// ================================================================== 5. アナライザー（このスマホ・PC）
+/** 押した場所の周波数に重なる局（PCの画面で重なりを押したときと同じ）。 */
+private fun <T> under(f: Double?, xs: List<T>, spans: (T) -> List<Channels.Span>): List<T> =
+    if (f == null) emptyList() else xs.filter { x -> spans(x).any { f >= it.lo && f <= it.hi } }
+
+/** 1秒ごとに進む時計（「◯秒前」を進めるため）。 */
 @Composable
-fun WalkScreen(vm: MainViewModel) {
+private fun ticker(): Long {
+    var t by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(Unit) { while (true) { delay(1000); t = SystemClock.elapsedRealtime() } }
+    return t
+}
+
+@Composable
+fun AnalyzerScreen(vm: MainViewModel) {
+    var source by rememberSaveable { mutableStateOf("phone") }
+    var band by rememberSaveable { mutableStateOf("all") }
+    Screen {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Pick(source == "phone", { source = "phone" }, { Text("このスマホ（リアルタイム）") })
+            Pick(source == "pc", { source = "pc" }, { Text("PCが見ている局") })
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            for ((k, l) in listOf("all" to "全部", Channels.B6 to "6GHz", Channels.B5 to "5GHz", Channels.B24 to "2.4GHz")) {
+                Pick(band == k, { band = k }, { Text(l) })
+            }
+        }
+        if (source == "phone") PhoneAnalyzer(vm, band) else PcAnalyzer(vm, band)
+    }
+}
+
+@Composable
+private fun PhoneAnalyzer(vm: MainViewModel, bandSel: String) {
     val ctx = LocalContext.current
     val w = LocalW.current
-    val ui by vm.walk.collectAsStateWithLifecycle()
+    val st by vm.phone.collectAsStateWithLifecycle()
+    val msg by vm.phoneMsg.collectAsStateWithLifecycle()
     val walks by vm.walks.collectAsStateWithLifecycle(emptyList())
     val outbox by vm.outboxCount.collectAsStateWithLifecycle(0)
     val scope = rememberCoroutineScope()
@@ -427,61 +460,123 @@ fun WalkScreen(vm: MainViewModel) {
         val t = exportText
         if (uri != null && t != null) ctx.contentResolver.openOutputStream(uri)?.use { it.write(t.toByteArray()) }
     }
-    var location by remember { mutableStateOf(vm.settings.locations.firstOrNull() ?: "") }
-    var tags by remember { mutableStateOf("歩測") }
-    var memo by remember { mutableStateOf("") }
-    var seconds by remember { mutableStateOf(30) }
-    Screen {
-        Text("Pixelを固定の高さと向きで持ち、1地点30〜60秒測ります。自チームの試合中はしません。", color = w.ink2, fontSize = 13.sp)
-        if (!granted) {
-            Button(onClick = { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }) { Text("位置情報の許可（Wi-Fiのスキャン結果を読むのに要ります）") }
-            return@Screen
+    var location by rememberSaveable { mutableStateOf(vm.settings.locations.firstOrNull() ?: "") }
+    var tags by rememberSaveable { mutableStateOf("スマホ") }
+    var memo by rememberSaveable { mutableStateOf("") }
+    var tapped by remember { mutableStateOf<Pair<String, Double>?>(null) }
+    val now = ticker()
+
+    Text("このスマホが受けたWi-Fiを、アプリを開いている間ずっとスキャンして描きます（PCの無線とは別）。", color = w.ink2, fontSize = 12.sp)
+    if (!granted) {
+        Button(onClick = { ask.launch(Manifest.permission.ACCESS_FINE_LOCATION) }) { Text("位置情報の許可（Wi-Fiのスキャン結果を読むのに要ります）") }
+    }
+    st.problem?.let { Text(it, color = w.crit, fontSize = 13.sp) }
+    val present = st.stations.filter { it.present(st.nowMs, vm.phonePresentMs) }
+    val last = st.lastResultMs?.let { ((now - it) / 1000).coerceAtLeast(0) }
+    Text("最新の結果 ${last?.let { "${it}秒前" } ?: "まだ無い"}・いる局 ${present.size}・届いた結果 ${st.updates}回（自分で頼んだスキャン ${st.requested}回）",
+        fontSize = 12.sp, color = w.ink2)
+    val next = st.nextScanMs?.let { ((it - now) / 1000).coerceAtLeast(0) }
+    Text(
+        if (st.throttled) "Androidのスキャン制限（2分に4回）で約30秒ごと${next?.let { "・次まで${it}秒" } ?: ""}。開発者向けオプションの「Wi-Fiスキャン調整」をオフにすると数秒ごとになります（ほかのアプリのスキャン結果も使います）"
+        else "数秒ごとにスキャンしています${next?.let { "・次まで${it}秒" } ?: ""}",
+        fontSize = 11.sp, color = if (st.throttled) w.warnInk else w.ink2,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+        OutlinedButton(onClick = { vm.phoneScanNow() }) { Text("今すぐスキャン") }
+    }
+    for (band in Channels.BANDS) {
+        if (bandSel != "all" && bandSel != band) continue
+        val bs = st.stations.filter { Channels.bandOf(it.freq) == band }
+        val nPresent = bs.count { it.present(st.nowMs, vm.phonePresentMs) }
+        SectionTitle("${Channels.BAND_LABEL[band]}（いる局 $nPresent）")
+        val mark = tapped?.takeIf { it.first == band }?.second
+        Spectrum(
+            band, bs.map { SpecStation(it.ssid ?: "（非公開）", null, it.op.spans, it.rssi, faded = !it.present(st.nowMs, vm.phonePresentMs)) },
+            height = if (bandSel == "all") 200.dp else 300.dp, maxLabels = if (bandSel == "all") 8 else 14, strong = -70,
+            marker = mark, onTap = { f -> tapped = if (mark != null && kotlin.math.abs(mark - f) < 3) null else band to f },
+        )
+        if (mark != null) {
+            val hit = under(mark, bs) { it.op.spans }.sortedByDescending { it.rssi }
+            Text("ここに重なる局 ${hit.size}（${"%.0f".format(mark)}MHz）", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+            for (s in hit) StationLine(s.ssid, s.bssid, s.op.primaryFreq, s.op.widthLabel, s.rssi, null, "802.11${s.standard}・${(st.nowMs - s.lastMs) / 1000}秒前")
         }
-        if (!vm.locationEnabled()) Text("位置情報（設定 → 位置情報）をオンにしてください。オフだとスキャン結果を読めません。", color = w.crit)
-        SectionTitle("場所")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (l in vm.settings.locations) Pick(location == l, { location = l }, { Text(l) })
+    }
+    SectionTitle("PCに送る（その時点でいる ${present.size}局）")
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (l in vm.settings.locations) Pick(location == l, { location = l }, { Text(l) })
+    }
+    OutlinedTextField(location, { location = it.take(40) }, label = { Text("場所") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(tags, { tags = it }, label = { Text("タグ（読点で区切る）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(memo, { memo = it.take(1000) }, label = { Text("メモ") }, modifier = Modifier.fillMaxWidth())
+    Button(enabled = present.isNotEmpty(), modifier = Modifier.padding(top = 6.dp), onClick = {
+        vm.sendPhoneSnapshot(location.trim().ifEmpty { null }, tags.split('、', ',').map { it.trim() }.filter { it.isNotEmpty() }, memo)
+    }) { Text("今の結果をPCに送る") }
+    msg?.let { Text(it, color = w.ink2, fontSize = 13.sp) }
+    SectionTitle("局（強い順）")
+    for (s in st.stations.sortedWith(compareBy({ !it.present(st.nowMs, vm.phonePresentMs) }, { -it.rssi })).take(60)) {
+        Column(Modifier.alpha(if (s.present(st.nowMs, vm.phonePresentMs)) 1f else 0.45f)) {
+            StationLine(s.ssid, s.bssid, s.op.primaryFreq, s.op.widthLabel, s.rssi, null, "802.11${s.standard}・${(st.nowMs - s.lastMs) / 1000}秒前")
         }
-        OutlinedTextField(location, { location = it.take(40) }, label = { Text("場所") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-            for (sec in listOf(30, 45, 60)) Pick(seconds == sec, { seconds = sec }, { Text("${sec}秒") })
+    }
+    val unsent = walks.count { it.sentAt == null && it.lastError == null }
+    SectionTitle("送った結果（${walks.size}件・未送 $unsent）")
+    if (outbox > 0) Text("端末に溜めて送る待ち：${outbox}件（ラベルの変更を含む）。中継に届けば自動で送ります。", color = w.ink2, fontSize = 12.sp)
+    Row {
+        OutlinedButton(onClick = { vm.resendOutbox() }) { Text("送り直す") }
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(onClick = { scope.launch { exportText = vm.exportWalks(); save.launch("wifiwatch-phone.json") } }) { Text("JSONで書き出す") }
+    }
+    for (e in walks.take(30)) {
+        Text("${jstOf(e.createdAt)}・${e.location ?: "場所なし"}・${e.nStations}局・" +
+            when { e.sentAt != null -> "送信済み"; e.lastError != null -> "送れない：${e.lastError}"; else -> "未送（端末に溜めています）" },
+            fontSize = 13.sp, modifier = Modifier.padding(vertical = 3.dp))
+    }
+}
+
+@Composable
+private fun PcAnalyzer(vm: MainViewModel, bandSel: String) {
+    val w = LocalW.current
+    val ui by vm.pcView.collectAsStateWithLifecycle()
+    var tapped by remember { mutableStateOf<Pair<String, Double>?>(null) }
+    val now = ticker()
+    Text("PCの無線が今見ている局です。押したときだけPCから1回取り寄せます（常には届きません）。", color = w.ink2, fontSize = 12.sp)
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+        Button(enabled = !ui.loading, onClick = { vm.requestPcView() }) { Text(if (ui.loading) "PCに頼んでいます…" else "PCから取り寄せる") }
+    }
+    ui.error?.let { Text(it, color = w.crit, fontSize = 13.sp) }
+    val v = ui.view ?: return
+    val s = v.state
+    val ago = ui.gotAtElapsed?.let { (now - it) / 1000 } ?: 0
+    val present = v.stations.count { it.present }
+    Text("${s?.device ?: "PC"}・${ago}秒前に取り寄せ・いる局 $present" + (if (v.nTotal > v.stations.size) "（多いので弱い局を${v.nTotal - v.stations.size}省略）" else "") +
+        (s?.let { "・自ch ${it.ownLabel}・${it.mode}" } ?: ""), fontSize = 12.sp, color = if (ago > 60) w.warnInk else w.ink2)
+    if (ago > 60) Text("1分以上前の内容です。今の様子は「PCから取り寄せる」でもう一度。", fontSize = 12.sp, color = w.warnInk)
+    if (v.scanOnly) Text("PCはスキャンだけのモードです（強さ不明の局は点線）。", fontSize = 11.sp, color = w.ink2)
+    KindLegend()
+    val blind = (s?.channels?.filter { it.blind }?.map { it.freq } ?: emptyList()).toSet() + (s?.unreceivableFreqs ?: emptyList())
+    for (band in Channels.BANDS) {
+        if (bandSel != "all" && bandSel != band) continue
+        val bs = v.stations.filter { Channels.bandOf(it.freq) == band }
+        val nb = blind.count { Channels.bandOf(it) == band }
+        SectionTitle("${Channels.BAND_LABEL[band]}（いる局 ${bs.count { it.present }}" + (if (nb > 0) "・見ていないch $nb" else "") + "）")
+        val mark = tapped?.takeIf { it.first == band }?.second
+        Spectrum(
+            band, bs.map { SpecStation(it.ssid ?: "（非公開）", it.kind, it.spans, it.rssi, faded = !it.present, alerting = it.alerting) },
+            ownFreq = s?.ownFreq, height = if (bandSel == "all") 200.dp else 300.dp, maxLabels = if (bandSel == "all") 8 else 14,
+            strong = v.strong, blind = blind, marker = mark,
+            onTap = { f -> tapped = if (mark != null && kotlin.math.abs(mark - f) < 3) null else band to f },
+        )
+        if (mark != null) {
+            val hit = under(mark, bs) { it.spans }.sortedByDescending { it.rssi ?: -200 }
+            Text("ここに重なる局 ${hit.size}（${"%.0f".format(mark)}MHz）", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+            for (x in hit) StationLine(x.ssid, x.bssid, x.freq, x.widthLabel, x.rssi, x.kind, listOfNotNull(x.team, x.model).joinToString("・").ifEmpty { null })
         }
-        Spacer(Modifier.height(8.dp))
-        Button(enabled = !ui.running, onClick = { vm.startWalk(seconds) }) { Text(if (ui.running) "測っています…" else "スキャンを始める") }
-        ui.progress?.let { p ->
-            if (ui.running) LinearProgressIndicator(progress = { 1f - p.secondsLeft / seconds.toFloat() }, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
-            Text("スキャン ${p.scans}回（新しい結果 ${p.fresh}・古い ${p.stale}）・局 ${p.stations}${if (ui.running) "・残り ${p.secondsLeft}秒" else "・測り終わり"}", fontSize = 12.sp, color = w.ink2)
-        }
-        ui.message?.let { Text(it, color = w.warnInk, fontSize = 13.sp) }
-        if (ui.seen.isNotEmpty()) {
-            for (band in Channels.BANDS) {
-                val bs = ui.seen.filter { Channels.bandOf(it.freq) == band }
-                if (bs.isEmpty()) continue
-                SectionTitle("${Channels.BAND_LABEL[band]}（${bs.size}局）")
-                Spectrum(band, bs.map { SpecStation(it.ssid ?: "（非公開）", null, it.op.spans, it.rssi) })
-            }
-            if (!ui.running) {
-                OutlinedTextField(tags, { tags = it }, label = { Text("タグ（読点で区切る）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(memo, { memo = it.take(1000) }, label = { Text("メモ") }, modifier = Modifier.fillMaxWidth())
-                Button(onClick = { vm.saveWalk(location.trim().ifEmpty { null }, tags.split('、', ',').map { it.trim() }.filter { it.isNotEmpty() }, memo) },
-                    modifier = Modifier.padding(top = 6.dp)) { Text("保存して送る") }
-            }
-            SectionTitle("局（強い順）")
-            for (s in ui.seen.sortedByDescending { it.rssi }.take(40)) StationLine(s.ssid, s.bssid, s.op.primaryFreq, s.op.widthLabel, s.rssi, null, s.standard.let { "802.11$it" })
-        }
-        // 未送は歩測だけを数える（送る待ちの行列にはラベルの変更も入る）
-        val unsent = walks.count { it.sentAt == null && it.lastError == null }
-        SectionTitle("自分の歩測（${walks.size}件・未送 $unsent）")
-        if (outbox > 0) Text("端末に溜めて送る待ち：${outbox}件（ラベルの変更を含む）。中継に届けば自動で送ります。", color = w.ink2, fontSize = 12.sp)
-        Row {
-            OutlinedButton(onClick = { vm.resendOutbox() }) { Text("送り直す") }
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = { scope.launch { exportText = vm.exportWalks(); save.launch("wifiwatch-walks.json") } }) { Text("JSONで書き出す") }
-        }
-        for (e in walks) {
-            Text("${jstOf(e.createdAt)}・${e.location ?: "場所なし"}・${e.nStations}局・" +
-                when { e.sentAt != null -> "送信済み"; e.lastError != null -> "送れない：${e.lastError}"; else -> "未送（端末に溜めています）" },
-                fontSize = 13.sp, modifier = Modifier.padding(vertical = 3.dp))
+    }
+    SectionTitle("局（強い順）")
+    for (x in v.stations.sortedWith(compareBy({ !it.present }, { -(it.rssi ?: -200) })).take(80)) {
+        Column(Modifier.alpha(if (x.present) 1f else 0.45f)) {
+            StationLine((if (x.alerting) "⚠ " else "") + (x.ssid ?: "（非公開SSID）"), x.bssid, x.freq, x.widthLabel, x.rssi, x.kind,
+                listOfNotNull(x.team, x.model).joinToString("・").ifEmpty { null })
         }
     }
 }

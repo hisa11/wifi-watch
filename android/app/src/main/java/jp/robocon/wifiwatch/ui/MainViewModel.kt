@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import jp.robocon.wifiwatch.App
 import jp.robocon.wifiwatch.core.Bodies
 import jp.robocon.wifiwatch.core.PcState
+import jp.robocon.wifiwatch.core.PcView
 import jp.robocon.wifiwatch.core.PollResult
 import jp.robocon.wifiwatch.core.RecordMeta
 import jp.robocon.wifiwatch.data.RecordEntity
@@ -14,7 +15,8 @@ import jp.robocon.wifiwatch.data.WalkEntity
 import jp.robocon.wifiwatch.net.NoNetworkException
 import jp.robocon.wifiwatch.net.RelayException
 import jp.robocon.wifiwatch.sync.Outbox
-import jp.robocon.wifiwatch.wifi.WalkScanner
+import jp.robocon.wifiwatch.wifi.LiveScanner
+import jp.robocon.wifiwatch.core.LiveTable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -250,48 +252,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Outbox.add(getApplication(), "label", id, rid, body)
     }
 
-    // ------------------------------------------------------------ 歩測
-    data class WalkUi(
-        val running: Boolean = false,
-        val progress: WalkScanner.Progress? = null,
-        val seen: List<WalkScanner.Seen> = emptyList(),
-        val seconds: Int = 30,
-        val message: String? = null,
-    )
-
-    private val _walk = MutableStateFlow(WalkUi())
-    val walk: StateFlow<WalkUi> = _walk
+    // ------------------------------------------------------------ スマホのアナライザー（アプリが前面にいる間はスキャンし続ける）
+    private val liveScanner = LiveScanner(application)
+    val phone: StateFlow<LiveScanner.State> = liveScanner.state
     val walks = app.db.walks().all()
-    private val scanner = WalkScanner(application)
+    private val _phoneMsg = MutableStateFlow<String?>(null)
+    val phoneMsg: StateFlow<String?> = _phoneMsg
 
-    fun locationEnabled() = scanner.locationEnabled()
+    val phonePresentMs get() = liveScanner.table.presentMs
+    fun startPhoneScan() = liveScanner.start(viewModelScope)
+    fun stopPhoneScan() = liveScanner.stop()
+    fun phoneScanNow() = liveScanner.scanNow()
 
-    fun startWalk(seconds: Int) {
-        if (_walk.value.running) return
-        _walk.value = WalkUi(running = true, seconds = seconds)
-        viewModelScope.launch {
-            try {
-                val (seen, prog) = scanner.run(seconds) { p, s -> _walk.update { it.copy(progress = p, seen = s.values.toList()) } }
-                val warn = if (prog.fresh == 0) "新しいスキャン結果が来ませんでした（開発者オプションの「Wi-Fiスキャン調整」を確かめてください）" else null
-                _walk.update { it.copy(running = false, progress = prog, seen = seen.values.toList(), message = warn) }
-            } catch (e: SecurityException) {
-                _walk.update { it.copy(running = false, message = "位置情報の許可が要ります") }
-            }
-        }
-    }
-
-    fun saveWalk(location: String?, tags: List<String>, memo: String) = viewModelScope.launch {
-        val w = _walk.value
-        val prog = w.progress ?: return@launch
-        if (w.seen.isEmpty()) return@launch
+    /** その時点で聞こえている局を、PCに送る（記録の形は歩測と同じ。回線が無ければ端末に溜めて、あとで送る）。 */
+    fun sendPhoneSnapshot(location: String?, tags: List<String>, memo: String) = viewModelScope.launch {
+        val st = liveScanner.state.value
+        val snap = liveScanner.table.snapshot(st.nowMs)
+        if (snap.isEmpty()) { _phoneMsg.value = "送る局がありません（スキャンの結果を待ってください）"; return@launch }
         val now = System.currentTimeMillis() / 1000.0
         val fmt = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).apply { timeZone = TimeZone.getTimeZone("Asia/Tokyo") }
         val id = "walk-" + fmt.format(Date()) + "-" + UUID.randomUUID().toString().take(4)
-        val rec = WalkScanner.record(id, settings.deviceName, w.seconds, prog, w.seen, location, tags, memo, now)
-        app.db.walks().put(WalkEntity(id, now, rec.toString(), location, w.seen.size))
+        val rec = LiveTable.record(id, settings.deviceName, liveScanner.table, st.nowMs, st.updates, location, tags, memo, now)
+        app.db.walks().put(WalkEntity(id, now, rec.toString(), location, snap.size))
         val rid = "app-walk-$id"
         Outbox.add(getApplication(), "walk", id, rid, Bodies.walk(rid, rec))
-        _walk.value = WalkUi(seconds = w.seconds, message = "保存しました（PCへ送ります。回線が無ければ端末に溜めて、あとで送ります）")
+        _phoneMsg.value = "${snap.size}局をPCへ送ります（回線が無ければ端末に溜めて、あとで送ります）"
+    }
+
+    // ------------------------------------------------------------ PCが今見ている局（頼んだときだけ取り寄せる）
+    data class PcViewUi(
+        val loading: Boolean = false, val view: PcView? = null, val error: String? = null,
+        val askedAtMs: Long? = null, val gotAtElapsed: Long? = null,
+    )
+
+    private val _pcView = MutableStateFlow(PcViewUi())
+    val pcView: StateFlow<PcViewUi> = _pcView
+    private var pcViewJob: Job? = null
+
+    /** 中継に頼む → PCが次の問い合わせ（前面中は2秒ごと）で気づいて1回置く → 置かれるまで読む（30秒まで）。 */
+    fun requestPcView() {
+        if (pcViewJob?.isActive == true) return
+        pcViewJob = viewModelScope.launch {
+            _pcView.update { it.copy(loading = true, error = null) }
+            try {
+                val asked = app.api.askPcView().optLong("requested_at")
+                _pcView.update { it.copy(askedAtMs = asked) }
+                val start = SystemClock.elapsedRealtime()
+                while (SystemClock.elapsedRealtime() - start < 30_000) {
+                    delay(1500)
+                    val v = PcView.parse(app.api.pcView())
+                    if (v.forMs != null && v.forMs >= asked) {
+                        _pcView.value = PcViewUi(view = v, askedAtMs = asked, gotAtElapsed = SystemClock.elapsedRealtime())
+                        return@launch
+                    }
+                }
+                _pcView.update { it.copy(loading = false, error = "30秒待ってもPCから届きません（PCが動いていて中継につながっているか確かめてください）") }
+            } catch (e: Exception) {
+                _pcView.update { it.copy(loading = false, error = describe(e)) }
+            }
+        }
     }
 
     suspend fun exportWalks(): String {

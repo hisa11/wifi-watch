@@ -217,3 +217,39 @@ describe("ラベル・歩測・記録の写し", () => {
     expect(s.body.fg).toBe(false);
   });
 });
+
+describe("PCが今見ている局（アプリが頼んだときだけ）", () => {
+  it("頼む → PCは次の問い合わせで気づく（待機中のコマンド数は1のまま）→ 1回置く → アプリが読む", async () => {
+    const e = env();
+    const v = (await e.pc("POST", "/api/pc/sync", { version: null })).body.version;
+    let [r, n] = await e.count(() => e.pc("POST", "/api/pc/sync", { version: v }));
+    expect(n).toBe(1);
+    expect(r.body.view_req).toBeNull(); // 頼まれていなければ何もしない（常には配らない）
+    [r, n] = await e.count(() => e.app("POST", "/api/app/pcview", {}));
+    expect(n).toBe(1);
+    const asked = r.body.requested_at;
+    [r, n] = await e.count(() => e.pc("POST", "/api/pc/sync", { version: v }));
+    expect(n).toBe(1); // 頼みは読むのと同じ1回のMGETに入る
+    expect(r.body.view_req).toBe(asked);
+    expect(r.body.changed).toBe(false); // 受信箱（指示）には入れない
+    [r, n] = await e.count(() => e.pc("PUT", "/api/pc/view", { for: asked, view: { stations: [{ b: "02:00:00:00:00:01", r: -60 }] } }));
+    expect(n).toBe(1);
+    [r, n] = await e.count(() => e.app("GET", "/api/app/pcview"));
+    expect(n).toBe(1);
+    expect(r.body.for).toBe(asked);
+    expect(r.body.view.stations[0].r).toBe(-60);
+    // 頼みは60秒で消える：PCはそれ以上置かない
+    e.advance(60_001);
+    expect((await e.pc("POST", "/api/pc/sync", { version: v })).body.view_req).toBeNull();
+  });
+
+  it("役割違いは断る（アプリは置けない、PCは頼めない）。大きすぎる一覧は413", async () => {
+    const e = env();
+    expect((await e.raw("PUT", "/api/pc/view", APP, { for: 1, view: {} })).status).toBe(403);
+    expect((await e.raw("POST", "/api/app/pcview", PC, {})).status).toBe(403);
+    expect((await e.raw("GET", "/api/app/pcview", null, undefined)).status).toBe(401);
+    const big = { for: 1, view: { pad: "x".repeat(300 * 1024) } };
+    expect((await e.pc("PUT", "/api/pc/view", big)).status).toBe(413);
+    expect((await e.pc("PUT", "/api/pc/view", { view: {} })).status).toBe(400);
+  });
+});

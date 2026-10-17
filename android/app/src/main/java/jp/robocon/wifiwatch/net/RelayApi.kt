@@ -84,4 +84,7 @@ class RelayApi(private val settings: RelayConfigSource, private val awaitCellula
     suspend fun walk(body: JSONObject) = call("POST", "/api/app/records", body)
     suspend fun records(since: Long, limit: Int = 200) = call("GET", "/api/app/records?since=$since&limit=$limit")
     suspend fun record(id: String) = call("GET", "/api/app/records/$id")
+    /** PCが今見ている局を頼む（指示ではない。PCが次の問い合わせで気づいて1回置く）。 */
+    suspend fun askPcView() = call("POST", "/api/app/pcview", JSONObject())
+    suspend fun pcView() = call("GET", "/api/app/pcview")
 }

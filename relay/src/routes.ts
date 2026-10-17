@@ -13,9 +13,12 @@
 //   ww:recmeta    記録の一覧用の情報（ハッシュ id → JSON）
 //   ww:recupd     更新時刻の索引（ソート済み集合、点数＝中継の時刻ms）
 //   ww:recbytes   記録の写しの合計バイト数
+//   ww:viewreq    アプリが「PCが今見ている局を見たい」と頼んだ時刻（期限60秒）。指示ではない（PCの動きは変えない）
+//   ww:view       PCが頼まれたときだけ置く、PCが今見ている局の一覧（期限1時間）
 //
 // 1回の問い合わせのコマンド数（上限）
 //   PCの待機中 1 ／ PCのアプリ前面中 4 ／ アプリの2秒ごとの問い合わせ 2（開いた直後は3）／ 置く操作 5以内
+//   PCの見ている局：頼む 1 ／ PCが置く 1 ／ アプリが読む 1
 
 import { HttpError, error, json, readJson, type Deps, type Route } from "./handler.js";
 import { makeHandler } from "./handler.js";
@@ -29,6 +32,8 @@ export const K = {
   recmeta: "ww:recmeta",
   recupd: "ww:recupd",
   recbytes: "ww:recbytes",
+  viewreq: "ww:viewreq",
+  view: "ww:view",
 };
 
 export const LIMITS = {
@@ -40,6 +45,9 @@ export const LIMITS = {
   recordBody: 512 * 1024,
   recordsTotalBytes: 100 * 1024 * 1024,
   listMax: 500,
+  viewReqTtlS: 60,
+  viewTtlS: 3600,
+  viewBody: 256 * 1024,
 };
 
 const BANDS = ["2.4", "5", "6"] as const;
@@ -182,6 +190,23 @@ async function appWalk(req: Request, d: Deps): Promise<Response> {
   return json(200, { id: recId, accepted_at: now, now });
 }
 
+// PCが今見ている局（アプリが頼んだときだけ）。受信箱には入れない：PCの動きを変える指示ではなく、
+// 「前面にいる印」と同じく、PCが次の問い合わせで気づいて一覧を1回置くだけ
+async function appViewRequest(req: Request, d: Deps): Promise<Response> {
+  obj((await readJson(req, LIMITS.smallBody)) ?? {}, "本文");
+  const r = await d.redis();
+  const now = d.now();
+  await r.set(K.viewreq, String(now), { ex: LIMITS.viewReqTtlS }); // 1
+  return json(200, { requested_at: now, now });
+}
+
+async function appView(_req: Request, d: Deps): Promise<Response> {
+  const r = await d.redis();
+  const v = parse<{ view: unknown; for: number; received_at: number }>(await r.get(K.view)); // 1
+  const now = d.now();
+  return json(200, { now, view: v?.view ?? null, for: v?.for ?? null, received_at: v?.received_at ?? null });
+}
+
 async function appRecords(req: Request, d: Deps): Promise<Response> {
   const u = new URL(req.url);
   const since = Number(u.searchParams.get("since") ?? "0");
@@ -219,7 +244,7 @@ async function pcSync(req: Request, d: Deps): Promise<Response> {
   }
   const r = await d.redis();
   const now = d.now();
-  const [ver, fg] = await r.mget([K.ver, K.fg]); // 1
+  const [ver, fg, viewreq] = await r.mget([K.ver, K.fg, K.viewreq]); // 1
   const current = ver ?? "0";
   const changed = version === null || version !== current;
   let inbox: (InboxItem & { field: string })[] | undefined;
@@ -243,7 +268,19 @@ async function pcSync(req: Request, d: Deps): Promise<Response> {
   }
   if (drop.length) await r.hdel(K.inbox, [...new Set(drop)]); // 3
   if (stateStr !== null) await r.set(K.state, JSON.stringify({ state: JSON.parse(stateStr), received_at: now })); // 4
-  return json(200, { now, version: current, changed, fg: fg !== null, inbox });
+  const vr = viewreq === null ? null : Number(viewreq);
+  return json(200, { now, version: current, changed, fg: fg !== null, view_req: Number.isFinite(vr) ? vr : null, inbox });
+}
+
+async function pcView(req: Request, d: Deps): Promise<Response> {
+  const b = obj(await readJson(req, LIMITS.viewBody), "本文");
+  const forMs = b.for;
+  if (typeof forMs !== "number" || !Number.isFinite(forMs)) throw new HttpError(400, "bad_request", "for（頼まれた時刻）が要ります");
+  const view = obj(b.view, "view");
+  const r = await d.redis();
+  const now = d.now();
+  await r.set(K.view, JSON.stringify({ view, for: forMs, received_at: now }), { ex: LIMITS.viewTtlS }); // 1
+  return json(200, { received_at: now });
 }
 
 async function pcRecord(req: Request, d: Deps, prm: Record<string, string>): Promise<Response> {
@@ -298,6 +335,9 @@ export const routes: Route[] = [
   { method: "PATCH", pattern: /^\/api\/app\/records\/(?<id>[^/]+)$/, role: "app", fn: appLabel },
   { method: "POST", pattern: /^\/api\/pc\/sync$/, role: "pc", fn: pcSync },
   { method: "PUT", pattern: /^\/api\/pc\/records\/(?<id>[^/]+)$/, role: "pc", fn: pcRecord },
+  { method: "POST", pattern: /^\/api\/app\/pcview$/, role: "app", fn: appViewRequest },
+  { method: "GET", pattern: /^\/api\/app\/pcview$/, role: "app", fn: appView },
+  { method: "PUT", pattern: /^\/api\/pc\/view$/, role: "pc", fn: pcView },
 ];
 
 export const handle = makeHandler(routes);

@@ -30,7 +30,7 @@ import jp.robocon.wifiwatch.ui.RecordsScreen
 import jp.robocon.wifiwatch.ui.ScanScreen
 import jp.robocon.wifiwatch.ui.SettingsScreen
 import jp.robocon.wifiwatch.ui.StatusScreen
-import jp.robocon.wifiwatch.ui.WalkScreen
+import jp.robocon.wifiwatch.ui.AnalyzerScreen
 import jp.robocon.wifiwatch.ui.WifiTheme
 import jp.robocon.wifiwatch.ui.verdictOf
 
@@ -45,8 +45,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             WifiTheme {
                 // 前面にいる間だけ2秒ごとに状態を取る（背面では取らない）
-                LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.startPolling() }
-                LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.stopPolling() }
+                // スマホのアナライザーも、前面にいる間はスキャンし続ける（どの画面を開いていても）
+                LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.startPolling(); vm.startPhoneScan() }
+                LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.stopPolling(); vm.stopPhoneScan() }
                 var tab by rememberSaveable { mutableStateOf(if (vm.settings.configured) "status" else "settings") }
                 var openRec by rememberSaveable { mutableStateOf<String?>(null) }
                 val live by vm.live.collectAsStateWithLifecycle()
@@ -75,7 +76,7 @@ class MainActivity : ComponentActivity() {
                             "scan" -> ScanScreen(vm) { openRec = it; tab = "records" }
                             "bands" -> BandsScreen(vm)
                             "records" -> RecordsScreen(vm, openRec) { openRec = null }
-                            "walk" -> WalkScreen(vm)
+                            "walk" -> AnalyzerScreen(vm)
                             else -> SettingsScreen(vm) { tab = "status" }
                         }
                     }
@@ -99,8 +100,8 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         val TABS = listOf(
-            Triple("status", "◉", "状態"), Triple("scan", "⟳", "スキャン"), Triple("bands", "☰", "帯域"),
-            Triple("records", "▤", "記録"), Triple("walk", "⌖", "歩測"),
+            Triple("status", "◉", "状態"), Triple("scan", "⟳", "PCスキャン"), Triple("bands", "☰", "帯域"),
+            Triple("records", "▤", "記録"), Triple("walk", "∿", "アナライザ"),
         )
     }
 }

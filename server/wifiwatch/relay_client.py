@@ -44,6 +44,7 @@ class RelayClient:
                                             "User-Agent": "wifiwatch-pc/0.1"})
         self.version: str | None = None  # 起動直後は版数なし＝受信箱を全部受け取る
         self.fg = False
+        self.view_served: float | None = None  # 最後に一覧を置いた「頼まれた時刻」（同じ頼みには1回だけ置く）
         self.acks: list[str] = []
         self.ok = False
         self.last_ok: float | None = None
@@ -116,6 +117,19 @@ class RelayClient:
         self._publish()
         if self.fg and not was_fg:
             self.wake.set()  # 前面になったらすぐ状態の写しを置く
+        vr = data.get("view_req")
+        if isinstance(vr, (int, float)) and vr != self.view_served:
+            self.push_view(float(vr))
+        return True
+
+    def push_view(self, asked: float) -> bool:
+        """アプリが「PCが今見ている局」を頼んだ：今の一覧を1回だけ置く（指示ではないので、PCの動きは変えない）。"""
+        try:
+            self._req("PUT", "/api/pc/view", {"for": asked, "view": self.ctl.pc_view()})
+        except RelayError as e:
+            self._fail(e)  # 頼みが残っていれば次の問い合わせでもう一度置く
+            return False
+        self.view_served = asked
         return True
 
     def _apply(self, item: dict[str, Any], relay_now: float) -> None:

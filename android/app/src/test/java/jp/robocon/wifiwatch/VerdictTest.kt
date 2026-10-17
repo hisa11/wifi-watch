@@ -5,7 +5,6 @@ import jp.robocon.wifiwatch.core.Ies
 import jp.robocon.wifiwatch.core.PcState
 import jp.robocon.wifiwatch.ui.MainViewModel
 import jp.robocon.wifiwatch.ui.verdictOf
-import jp.robocon.wifiwatch.wifi.WalkScanner
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -54,20 +53,5 @@ class VerdictTest {
         assertEquals("6GHz ch21", s.followed?.to)
         assertEquals(false, s.followed?.reserved)
         assertEquals(listOf("6GHz ch21・20MHz", "6GHz ch53・20MHz"), s.followPending)
-    }
-
-    @Test
-    fun walkRecordHasSampleShape() {
-        val sample = JSONObject(TestData.text("relay/app_walk.json")).getJSONObject("record")
-        val ies = Ies.unhex(sample.getJSONArray("stations").getJSONObject(0).getString("ies_hex"))
-        val op = Ies.operating(Ies.parseRaw(ies), 5975)
-        val seen = WalkScanner.Seen("02:a0:00:00:00:01", "KOSEN-A-6G", 5975, 0, 0, 0, mutableListOf(-60, -58, -57), Ies.hex(ies), "ax", op, 1)
-        val rec = WalkScanner.record("walk-1", "pixel-9a", 30, WalkScanner.Progress(5, 5, 0, 1, 0), listOf(seen), "フィールド北", listOf("歩測"), "", 1.0)
-        assertEquals(sample.keys().asSequence().sorted().toList(), rec.keys().asSequence().sorted().toList())
-        val st = rec.getJSONArray("stations").getJSONObject(0)
-        val ss = sample.getJSONArray("stations").getJSONObject(0)
-        assertTrue(ss.keys().asSequence().all { st.has(it) })
-        assertEquals(-58, st.getInt("rssi")) // 中央値
-        assertEquals(Channels.freqToNumber(5975), st.getInt("ch"))
     }
 }

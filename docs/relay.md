@@ -25,6 +25,8 @@
 | `ww:recmeta` | ハッシュ | 記録の一覧用の情報（id → JSON） |
 | `ww:recupd` | ソート済み集合 | 更新時刻（中継のms）の索引。アプリは「前回から更新されたもの」だけ取る |
 | `ww:recbytes` | 文字列（整数） | 記録の写しの合計バイト数。100MBを超えたら更新の古い順に消す（PCが正本なので消えても困らない） |
+| `ww:viewreq` | 文字列（期限60秒） | アプリが「PCが今見ている局を見たい」と頼んだ時刻（中継のms）。指示ではない（受信箱に入れず、PCの動きを変えない） |
+| `ww:view` | 文字列（期限1時間） | PCが頼まれたときだけ1回置く、PCが今見ている局の一覧（256KBまで）と、応えた頼みの時刻 |
 
 受信箱の項目：
 
@@ -47,6 +49,7 @@
 | 置く操作（指示・ラベル・歩測） | 5 | 2（`HSETNX`/`HSET`・`INCR`）。重複の確認で `HGET` が加わることがある |
 | 記録の写しを置く（PC） | 5 | `HGET`・`SET`・`HSET`・`ZADD`・`INCRBY`（合計が100MBを超えたときだけ、消す分が加わる） |
 | 記録の一覧・詳細（アプリ） | 2 | `ZRANGE BYSCORE`・`HMGET` ／ `GET`・`HGET` |
+| PCが見ている局：頼む（アプリ）／置く（PC）／読む（アプリ） | 1／1／1 | `SET EX`／`SET EX`／`GET`。PCが頼みに気づくのは、いつもの問い合わせの `MGET`（`ww:viewreq` を足しただけで1のまま） |
 
 `relay/test/api.test.ts` でこの上限をテストで固定している。パイプライン・トランザクション・Luaは使わない（Upstashの数え方がドキュメントに無いため）。
 
@@ -61,6 +64,18 @@
 
 Vercelの関数の呼び出しは大会1日あたり約1.5万回（PC 9,360＋アプリ 5,400）。
 
+**2026-10-17 上限を確かめ直した**（vercel.com/docs/plans/hobby、upstash.com/pricing/redis）
+
+| 上限（1か月） | 見込み（PCを30日つけっぱなし＋大会4日×アプリ3時間） | 割合 |
+| --- | --- | --- |
+| Vercel：関数の呼び出し 100万回・CDNの要求 100万回 | 約30万回（PCの待機 10秒ごと 25.9万＋アプリを開いている間 約4万） | 約30% |
+| Vercel：Active CPU 4時間 | 1回数ミリ秒の見込み（JSONの読み書きだけで、Redisの待ちは数えない）。30万回×10ミリ秒でも約50分 | 約2割以下（ダッシュボードの Usage で1日後に確かめる） |
+| Vercel：Provisioned Memory 360GB時・Fast Data Transfer 100GB・Fast Origin Transfer 10GB | 状態の写し8KB×2秒ごとでも1日数十MB | わずか |
+| Upstash：コマンド 50万回 | 待機 25.9万＋大会 10.4万 | 約73% |
+| Upstash：帯域 10GB・データ 250MB | 約0.4GB・記録の写しは100MBまで | 約4%・4割以下 |
+
+Hobbyで上限を超えると、その機能は30日たつまで止まる（課金はされない）。Upstashの無料プランで超えたときの扱いは、料金のページに書かれていない。大会の月以外はPCを止めておくか、`relay.idle_interval_s` を20〜30秒にすると、PCの待機の分（いちばん大きい）が半分以下になる。PCが見ている局を頼む・置く・読むは1回あたりRedis 3〜5コマンドと数十KBなので、1日数十回でも割合は変わらない。スマホのアナライザーのスキャンは端末の中だけで、中継を使わない（「今の結果をPCに送る」だけが中継を通る）。Hobbyは個人・非商用の利用に限られる（チームの部活動の道具として使う前提）。
+
 ## API（確定版）
 
 すべて `Authorization: Bearer <トークン>`。本文はJSON。誤りは `{"error": "コード", "message": "日本語"}`。時刻：`accepted_at`・`now`・`received_at` は中継の時計（UNIXミリ秒）、`edited_at`・`created_at` はUTCのエポック秒。
@@ -74,7 +89,9 @@ Vercelの関数の呼び出しは大会1日あたり約1.5万回（PC 9,360＋�
 | `GET /api/app/records?since=<ms>&limit=` | → `{"records": [一覧の情報…], "next_since", "more"}`（`since` より後に更新されたものだけ） |
 | `GET /api/app/records/{id}` | → 記録の本文＋`meta`。無ければ404 |
 | `PATCH /api/app/records/{id}` | `{"request_id", "label": {"location", "tags", "memo"}, "edited_at"}` → `{"id", "accepted_at"}` |
-| `POST /api/app/records` | `{"request_id", "record": {"id", "kind": "walk", "created_at", "stations": […], "label"?…}}`（512KBまで）→ `{"id", "accepted_at"}` |
+| `POST /api/app/records` | `{"request_id", "record": {"id", "kind": "walk", "created_at", "stations": […], "label"?…}}`（512KBまで）→ `{"id", "accepted_at"}`。スマホのアナライザーの「今の結果をPCに送る」もこの形 |
+| `POST /api/app/pcview` | `{}` → `{"requested_at", "now"}`。PCが今見ている局を頼む（60秒で消える） |
+| `GET /api/app/pcview` | → `{"now", "view", "for", "received_at"}`。`for` が頼んだ時刻以上なら、その頼みへの一覧。まだなら前の一覧か null |
 
 `params`：`scan` は `{"bands"?: ["6","5","2.4"], "freqs"?: [MHz], "confirm"?: bool}`、`bands` は `{"excluded_bands": […], "excluded_freqs": [MHz]}`（全体を置き換える）。
 
@@ -86,6 +103,7 @@ Vercelの関数の呼び出しは大会1日あたり約1.5万回（PC 9,360＋�
 | --- | --- |
 | `POST /api/pc/sync` | `{"version": str|null, "acks": [受信箱の項目…], "state"?: {…8KB以下}}` → `{"now", "version", "changed", "fg", "inbox"?: [{…, "field"}]}`。`inbox` は版数が変わったとき（または `version: null`）だけ。期限を過ぎた指示は入れずに消す |
 | `PUT /api/pc/records/{id}` | `{"record": {…ラベル込みの本文}}`（512KBまで）→ `{"id", "updated_at", "total_bytes", "trimmed"}` |
+| `PUT /api/pc/view` | `{"for": 頼まれた時刻, "view": {"state", "strong", "stations": [{"b","s","f","w","sp","r","k","t","m","x","p","a","ag"}…], "n_total", "scan_only"}}`（256KBまで）→ `{"received_at"}`。`/api/pc/sync` の応答の `view_req` が前に応えたものと違うときだけ、1回置く |
 
 PCの動き（`server/wifiwatch/relay_client.py`）：起動直後は `version: null`。前面の印があれば2秒、無ければ10秒ごと。保存できた項目だけ次の問い合わせで `acks` に入れる。保存できなかったら版数を忘れて次も全部受け取る。
 

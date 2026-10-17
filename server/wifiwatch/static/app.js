@@ -1173,7 +1173,7 @@ async function renderRecords(force = false) {
     el.dataset.built = "1";
     const locs = ui.state?.locations || [];
     const kind = h("select", { onchange: (e) => { R.filter.kind = e.target.value; renderRecords(true); } },
-      h("option", { value: "", text: "種類：全部" }), h("option", { value: "pc_scan", text: "PCの手動スキャン" }), h("option", { value: "walk", text: "歩測" }));
+      h("option", { value: "", text: "種類：全部" }), h("option", { value: "pc_scan", text: "PCの手動スキャン" }), h("option", { value: "walk", text: "スマホ" }));
     const loc = h("select", { onchange: (e) => { R.filter.location = e.target.value; renderRecords(true); } },
       h("option", { value: "", text: "場所：全部" }), ...locs.map((l) => h("option", { value: l, text: l })));
     const band = h("select", { onchange: (e) => { R.filter.band = e.target.value; renderRecords(true); } },
@@ -1192,7 +1192,7 @@ async function renderRecords(force = false) {
   if (!R.list.length) list.append(h("p", { class: "sub", style: "padding:8px", text: "記録はまだありません（手動スキャンか歩測で作られます）" }));
   for (const r of R.list) {
     list.append(h("div", { class: `rec-item${r.id === R.selected ? " sel" : ""}`, onclick: () => { R.selected = r.id; loadRecord(r.id); renderRecords(); } },
-      h("div", { class: "t", text: `${r.kind === "walk" ? "歩測" : "手動スキャン"}・${dJST(r.created_at)}` }),
+      h("div", { class: "t", text: `${r.kind === "walk" ? "スマホ" : "手動スキャン"}・${dJST(r.created_at)}` }),
       h("div", { class: "s" }, `${r.label.location || "場所なし"}・${r.n_stations}局・${r.bands.map((b) => BAND_JP[b]).join("/")}・${r.origin === "app" ? "アプリ" : "画面"}`),
       r.label.tags.length ? h("div", null, ...r.label.tags.map((t) => h("span", { class: "tag", text: t }))) : null));
   }
@@ -1222,7 +1222,7 @@ function renderRecordDetail() {
       renderRecords(true);
     } catch (e) { toast(e.message, true); }
   } });
-  el.append(h("h3", { text: `${r.kind === "walk" ? "歩測" : "PCの手動スキャン"}・${dJST(r.created_at)}` }),
+  el.append(h("h3", { text: `${r.kind === "walk" ? "スマホから送った結果" : "PCの手動スキャン"}・${dJST(r.created_at)}` }),
     h("div", { class: "sub", text: `${r.device || ""}・${r.origin === "app" ? "アプリから" : "画面から"}・${(r.settings?.freqs || []).length || ""}${r.settings?.freqs ? "ch" : ""}・最終更新 ${lab.updated_at ? dJST(lab.updated_at) : "—"}${lab.updated_by ? `（${lab.updated_by === "app" ? "アプリ" : "画面"}）` : ""}` }),
     h("div", { class: "label-editor" }, h("label", { text: "場所" }), h("div", null, loc, dl), h("label", { text: "タグ" }), tags, h("label", { text: "メモ" }), memo, h("span"), h("div", null, save)));
   const sts = (r.stations || []).map((x) => ({
@@ -1261,7 +1261,7 @@ function chRowsFor(band) {
 }
 
 // ------------------------------------------------------------------ イベント
-const EV_CAT = [["", "全部"], ["alert", "警報"], ["scan", "手動スキャン"], ["bands", "帯域ON/OFF"], ["mode", "モード"], ["radio", "受信"], ["label", "ラベル"], ["walk", "歩測"], ["tag", "タグ"], ["own", "自ch"], ["system", "起動"]];
+const EV_CAT = [["", "全部"], ["alert", "警報"], ["scan", "手動スキャン"], ["bands", "帯域ON/OFF"], ["mode", "モード"], ["radio", "受信"], ["label", "ラベル"], ["walk", "スマホ"], ["tag", "タグ"], ["own", "自ch"], ["system", "起動"]];
 async function renderEvents(force = false) {
   const el = $("pEvents");
   const E = ui.events;

@@ -499,7 +499,7 @@ class Controller:
         new = self.store.upsert_record(body, now)
         if new:
             self.store.relay_enqueue("record", body["id"], now)
-            self.log_event("walk", "ingest", "info", body["id"], "歩測の記録を受け取った",
+            self.log_event("walk", "ingest", "info", body["id"], "スマホの結果を受け取った",
                            f"{len(sts)}局・場所={label['location'] or '—'}", origin)
         return {"id": body["id"], "new": new}
 
@@ -646,6 +646,24 @@ class Controller:
                       "unreceivable": list(getattr(mon.radio, "unreceivable", None) or [])},
             "clients": sum(1 for c in list(mon.analyzer.table.clients.values()) if now - c.last_seen < 900),
         }
+
+    # ------------------------------------------------------------ アプリが頼んだときだけ置く、PCが今見ている局
+    def pc_view(self, limit: int = 200_000) -> dict[str, Any]:
+        """PCの画面のアナライザーと同じ中身（局ごとの主ch・帯域・強さ・分類・いるか）と、chの状態（見ていないchの区別）。
+        アプリが頼んだときに1回だけ中継に置く（常には配らない）。大きすぎるときは、いない局→弱い局の順に落とす。"""
+        sts = self.stations(include_gone_s=120.0)
+        sts.sort(key=lambda q: (not q["present"], -(q["rssi"] if q["rssi"] is not None else -200)))
+        rows = [{"b": q["bssid"], "s": q["ssid"], "h": q["hidden"], "f": q["freq"], "w": q["width_label"],
+                 "sp": q["spans"], "r": q["rssi"], "k": q["kind"], "t": q["team"], "m": q["model"], "x": q["standard"],
+                 "p": q["present"], "a": bool(q["alerts"]), "ag": round(q["age_s"])} for q in sts]
+        out: dict[str, Any] = {"v": 1, "at": round(self.clock.time(), 1), "state": self.compact_state(),
+                               "strong": self.cfg.thresholds.strong_rssi_dbm, "stations": rows,
+                               "scan_only": bool(getattr(self.mon.radio, "scan_only", False))}
+        while rows and len(json.dumps(out, ensure_ascii=False).encode("utf-8")) > limit:
+            gone = [i for i, q in enumerate(rows) if not q["p"]]
+            del rows[gone[-1] if gone else len(rows) - 1]
+        out["n_total"] = len(sts)
+        return out
 
     # ------------------------------------------------------------ 中継に置く状態の写し（8KB以下）
     STATE_CODES = {"own": "o", "in_block": "i", "patrol": "p", "excluded": "x", "paused": "z", "scanning": "s",

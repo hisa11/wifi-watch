@@ -97,6 +97,12 @@ class AppRole:
     def walk(self, rid, rec):
         return self.c.post("/api/app/records", json={"request_id": rid, "record": rec})
 
+    def ask_view(self):
+        return self.c.post("/api/app/pcview", json={}).json()
+
+    def view(self):
+        return self.c.get("/api/app/pcview").json()
+
 
 def make_pc(tmp_path, relay_url, ntfy_url=None, scenario=None):
     d = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
@@ -179,6 +185,38 @@ def test_round_trip_all_operations(tmp_path, relay):
     # 受信箱は空になっている（保存したと返した）
     rc.sync_once()
     assert rc.sync_once() and rc.version is not None
+    pc.store.close()
+
+
+def test_pc_view_only_when_app_asks(tmp_path, relay):
+    """スマホからPCが今見ている局を見る。頼んだときだけPCが1回置く（常には配らない）。PCの動きは変えない。"""
+    pc, clk = make_pc(tmp_path, relay.url)
+    rc = pc.relay
+    app = AppRole(relay.url)
+    pc.monitor.run_for(30)
+    mode = pc.monitor.scheduler.mode
+    rc.sync_once()
+    rc.sync_once()
+    assert app.view()["view"] is None  # 頼まれていなければ置かない
+    asked = app.ask_view()["requested_at"]
+    rc.sync_once()
+    v = app.view()
+    assert v["for"] == asked
+    view = v["view"]
+    assert view["stations"] and {"b", "f", "sp", "r", "k", "p"} <= set(view["stations"][0])
+    assert view["state"]["own"]["label"] == "6GHz ch37" and view["state"]["channels"]
+    assert view["strong"] == pc.controller.cfg.thresholds.strong_rssi_dbm
+    # 同じ頼みには1回だけ：もう一度問い合わせても置き直さない
+    at = v["received_at"]
+    rc.sync_once()
+    assert app.view()["received_at"] == at
+    # 一覧を置いても、PCのモード・巡回は変わらない（指示ではない）
+    assert pc.monitor.scheduler.mode == mode and not pc.monitor.scheduler.manual_running
+    # 次に頼んだら、新しい一覧を置く
+    time.sleep(0.01)
+    asked2 = app.ask_view()["requested_at"]
+    rc.sync_once()
+    assert app.view()["for"] == asked2
     pc.store.close()
 
 
