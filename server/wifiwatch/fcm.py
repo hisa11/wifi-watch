@@ -5,7 +5,8 @@
   developers.google.com/identity/protocols/oauth2/service-account で確認）。
 - 送り先は https://fcm.googleapis.com/v1/projects/{project_id}/messages:send、宛先はトピック（アプリが起動時に登録する）。
   緊急・警告は android.priority=high（スマホが休んでいても起こす。firebase.google.com/docs/cloud-messaging/android-message-priority）。
-- 音・バイブ・画面の上に出すかは、アプリが作る通知チャネル（channel_id）で決まる。
+- 音・バイブ・画面の上に出すかは、アプリが作る通知チャネルで決まる。data だけで送り、アプリが届いたものから通知を作る
+  （スマホごとの「アラームとして鳴らす」の設定を効かせるため）。
 """
 from __future__ import annotations
 
@@ -37,15 +38,15 @@ def _b64(b: bytes) -> str:
 
 
 def message(topic: str, level: str | None, kind: str, title: str, body: str, tag: str) -> dict[str, Any]:
-    """送る中身。通知（タイトル・本文）はアプリが閉じていても通知欄に出る。data はアプリが開いているときに自分で出す用。"""
+    """送る中身。data だけ（notification を付けない）にして、アプリが閉じていても届いたらアプリが自分で通知を出す
+    （鳴らし方＝アラームとして鳴らすか、をスマホごとの設定で決めるため）。緊急・警告は優先度高でスマホを起こす
+    （data だけでも、高優先度ならアプリが起こされる。必ず通知を出すので、優先度を下げられない）。"""
     chan = CHANNELS["resolved"] if kind == "resolved" else CHANNELS.get(level or "info", CHANNELS["info"])
     urgent = kind != "resolved" and level in ("crit", "warn")
     return {
         "topic": topic,
-        "notification": {"title": title[:200], "body": body[:1000]},
         "data": {"level": level or "", "kind": kind, "title": title[:200], "body": body[:1000], "tag": tag, "channel": chan},
-        "android": {"priority": "high" if urgent else "normal", "ttl": "3600s",
-                    "notification": {"channel_id": chan, "tag": tag}},
+        "android": {"priority": "high" if urgent else "normal", "ttl": "3600s"},
     }
 
 

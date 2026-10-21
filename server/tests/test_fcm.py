@@ -84,13 +84,14 @@ def test_alerts_go_to_the_app_with_sound_channels(tmp_path, keyfile):
     n.heartbeat()  # 稼働中はアプリには送らない（ntfy の設定が無いので、どこにも送らない）
     n.deliver_due()
     msgs = [m for _, m in g.sent]
-    assert [m["android"]["notification"]["channel_id"] for m in msgs] == ["alert_warn", "alert_crit", "alert_resolved"]
+    assert [m["data"]["channel"] for m in msgs] == ["alert_warn", "alert_crit", "alert_resolved"]
+    assert all("notification" not in m for m in msgs)  # data だけ：届いたらアプリが鳴らし方を決めて通知を出す
     assert [m["android"]["priority"] for m in msgs] == ["high", "high", "normal"]  # 緊急・警告はスマホが休んでいても起こす
     assert all(m["topic"] == "wifiwatch-alerts" for m in msgs)
-    assert msgs[0]["notification"]["title"] == "警告｜割当違反（予約外ch）"
-    assert msgs[1]["notification"]["title"].startswith("緊急｜")
-    assert msgs[2]["notification"]["title"].startswith("解消｜")
-    assert msgs[0]["android"]["notification"]["tag"] == msgs[2]["android"]["notification"]["tag"]  # 解消で置き換わる
+    assert msgs[0]["data"]["title"] == "警告｜割当違反（予約外ch）" and msgs[0]["data"]["level"] == "warn"
+    assert msgs[1]["data"]["title"].startswith("緊急｜")
+    assert msgs[2]["data"]["title"].startswith("解消｜") and msgs[2]["data"]["kind"] == "resolved"
+    assert msgs[0]["data"]["tag"] == msgs[2]["data"]["tag"]  # 解消で置き換わる
     assert all(isinstance(v, str) for m in msgs for v in m["data"].values())  # data の値は文字列
     assert g.tokens == 1 and g.sent[0][0] == "Bearer tok1"  # トークンは使い回す
     assert store.notify_backlog() == 0
@@ -122,7 +123,7 @@ def test_rate_limit_and_bad_message_do_not_block_forever(tmp_path, keyfile):
         n.deliver_due()
         n.clock.advance(120)
     # 中身が悪いもの（400）は3回で諦め、後ろの警報は届く
-    assert [m["android"]["notification"]["channel_id"] for _, m in g.sent] == ["alert_crit"]
+    assert [m["data"]["channel"] for _, m in g.sent] == ["alert_crit"]
     store.close()
 
 

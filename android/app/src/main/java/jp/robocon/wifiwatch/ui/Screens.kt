@@ -616,6 +616,16 @@ private fun PushSettings() {
         Text("通知が許可されていないので、届いても出ません。", fontSize = 13.sp, color = w.crit)
         Button(onClick = { if (Build.VERSION.SDK_INT >= 33) ask.launch(Manifest.permission.POST_NOTIFICATIONS) else openSettings() }) { Text("通知を許可する") }
     }
+    var alarm by remember { mutableStateOf(Push.alarmMode(ctx)) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 6.dp)) {
+        Switch(alarm, { alarm = it; Push.setAlarmMode(ctx, it) })
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text("緊急・警告はアラームとして鳴らす", fontWeight = FontWeight.SemiBold)
+            Text("オンにすると、おやすみモードやマナーモードでも、アラームの音量で鳴ってバイブします（おやすみモードで「アラーム」を許可しているとき）。授業中なども鳴るので、大会の間だけオンにする使い方がおすすめです。",
+                fontSize = 11.sp, color = w.ink2)
+        }
+    }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { Push.testLocal(ctx); checks++ }) { Text("このスマホで試しに鳴らす") }
         OutlinedButton(onClick = { openSettings() }) { Text("鳴り方を変える（Androidの設定）") }
