@@ -125,3 +125,35 @@ def test_tcpdump_cross_check(tmp_path):
         if e.get("bad_fcs"):
             assert "bad-fcs" in line, line
     path.unlink()
+
+
+def _ax210_beacon_radiotap(signal: int, chains: tuple[int, int]) -> bytes:
+    # 本番PC（AX210）で受けた 2.4GHz のビーコンと同じ並び（present a040402f,a0000820,00000820・長さ 0x38）
+    b = bytearray(0x38)
+    struct.pack_into("<BBHIII", b, 0, 0, 0, 0x38, 0xA040402F, 0xA0000820, 0x00000820)
+    struct.pack_into("<Q", b, 16, 123456)          # TSFT
+    b[24], b[25] = 0x10, 2                         # Flags（FCSあり）・Rate 1Mbps
+    struct.pack_into("<HH", b, 26, 2412, 0x00A0)   # Channel
+    struct.pack_into("<b", b, 30, signal)          # 合成の強さ（ドライバ）
+    struct.pack_into("<H", b, 32, 0)               # RX flags
+    struct.pack_into("<b", b, 52, chains[0]); b[53] = 0
+    struct.pack_into("<b", b, 54, chains[1]); b[55] = 1
+    return bytes(b)
+
+
+def test_ax210_layout_reads_chains():
+    rx = radiotap.parse(_ax210_beacon_radiotap(-51, (-51, -52)))
+    assert (rx.length, rx.freq, rx.driver_signal) == (0x38, 2412, -51)
+    assert rx.chains == ((0, -51), (1, -52)) and rx.signal == -48  # 2本の電力の和
+    assert rx.fcs_at_end
+
+
+def test_impossible_driver_signal_is_unknown():
+    # 0dBm以上は受けられないほど強い（ドライバが値を持っていない）。強さ不明にし、書かれた値は残す
+    from wifiwatch.capture import build
+    for v in (0, 5, 127):
+        rx = radiotap.parse(build.radiotap(2412, signal=v))
+        assert rx.signal is None and rx.driver_signal == v
+    rx = radiotap.parse(build.radiotap(2412, signal=0, chains=[-60, -62]))
+    assert rx.signal == -58  # アンテナごとの値があれば、それを使う
+    assert radiotap.parse(build.radiotap(2412, signal=-40)).signal == -40

@@ -4,6 +4,8 @@
 - 各フィールドはヘッダ先頭からの自然な整列（align）に合わせて読む。
 - 強さ（RSSI）は2本を合成した値を使う。アンテナごとの値（2つ目以降の名前空間）があれば
   電力の和で合成し、無ければドライバが最初の名前空間に入れた値を使う。
+  0dBm以上・-127dBm以下はありえない値（受けられないほど強い・値なし）なので、強さ不明にする
+  （driver_signal・chains には書かれたままの値を残す。調べる道具で見るため）。
 """
 from __future__ import annotations
 
@@ -214,5 +216,6 @@ def parse(buf: bytes | bytearray | memoryview) -> Rx:
 
     rx.chains = tuple(chains)
     combined = combine_dbm([s for _, s in chains]) if chains else None
-    rx.signal = combined if combined is not None else rx.driver_signal
+    drv = rx.driver_signal
+    rx.signal = combined if combined is not None else (drv if drv is not None and -127 < drv < 0 else None)
     return rx

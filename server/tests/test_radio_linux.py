@@ -449,18 +449,32 @@ def test_link_up_is_retried_after_io_error(sysnet):
     assert [c for c in run.calls if c == ["ip", "link", "set", "wlan0", "up"]].__len__() == 2  # 1回断られて、2回目で上がった
 
 
-def test_rtdump_shows_signal_and_radiotap_head_only(sysnet, capsys):
-    # 本番PCで 2.4GHz の強さが -2〜-12dBm と出た件を調べる道具：radiotap の強さと読み取りを並べ、頭だけを出す
+def test_rtdump_summarizes_each_ap(sysnet, capsys, tmp_path):
+    # 本番PCで 2.4GHz の強さが -2〜-12dBm と出た件を調べる道具：APごとに、スキャンの手本・長く居たとき・短く切り替えたとき・
+    # 本体の計算を並べ、外れた値のフレームだけ radiotap の頭を出す
     import argparse
     from wifiwatch import hwprobe
     run = FakeRunner()
     r, feed = make_linux(run, sysnet)
     r.set_monitor()
-    r.tune = lambda t: setattr(r, "tuning", t)  # 合わせたことにする（受けたフレームを流し込む）
-    bcn = build.radiotap(F("2g1"), signal=-61, chains=[-63, -65]) + build.beacon("02:00:00:00:00:01", build.ap_ies(F("2g1"), 20, "AP1", standard="n"))
-    for _ in range(3):
-        feed.send(bcn)
-    hwprobe.cmd_rtdump(r, argparse.Namespace(chs="2g1", seconds=0.3, per_ch=1))
+    good = build.radiotap(F("2g1"), signal=-61, chains=[-63, -65]) + build.beacon("02:00:00:00:00:01", build.ap_ies(F("2g1"), 20, "AP1", standard="n"))
+    odd = build.radiotap(F("2g1"), signal=-3, chains=[-3, -60]) + build.beacon("02:00:00:00:00:01", build.ap_ies(F("2g1"), 20, "AP1", standard="n"))
+    leak = build.radiotap(F("2g2"), signal=-70) + build.beacon("02:00:00:00:00:02", build.ap_ies(F("2g1"), 20, "AP2", standard="n"))
+
+    def tune(t):  # 合わせたことにして、そのchで受けたフレームを流し込む
+        r.tuning = t
+        for fr in ([good] * 4 + [odd] if t.freq == F("2g1") else [leak]):
+            feed.send(fr)
+    r.tune = tune
+    ref = tmp_path / "ref.txt"
+    ref.write_text("02:00:00:00:00:01 2412 -60.00\n02:00:00:00:00:09 2412 -70.00\n")
+    hwprobe.cmd_rtdump(r, argparse.Namespace(chs="2g1,2g2", passes="0.2x1,0.1x1", ref=str(ref)))
     out = capsys.readouterr().out
-    assert "02:00:00:00:00:01" in out and "ドライバ=-61" in out and "アンテナごと=[-63, -65]" in out
-    assert "AP1".encode().hex() not in out  # ビーコンの中身（SSID）は出さない
+    line = next(x for x in out.splitlines() if "02:00:00:00:00:01" in x and "手本" in x)
+    assert "AP1" in line and "手本 -60" in line and "長 -61(-61〜-3)n5" in line and line.startswith("  2g1 ")
+    assert "本体" in line
+    assert "スキャンだけで見えた（モニタで受けなかった）1局" in out
+    assert "読み取り=-3 ドライバ=-3 アンテナごと=[-3, -60]" in out and "頭=" in out
+    # 主chでないchで受けたもの（隣のchへの漏れ）は、主chの欄には入れず、本体の計算には入れる
+    line2 = next(x for x in out.splitlines() if "02:00:00:00:00:02" in x)
+    assert "長     —" in line2 and "本体 -70" in line2
