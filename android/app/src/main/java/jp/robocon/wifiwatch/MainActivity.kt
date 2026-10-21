@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
             WifiTheme {
                 // 前面にいる間だけ2秒ごとに状態を取る（背面では取らない）
                 // スマホのアナライザーも、前面にいる間はスキャンし続ける（どの画面を開いていても）
-                LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.startPolling(); vm.startPhoneScan() }
+                LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.startPolling(); vm.startPhoneScan(); Push.subscribe(this@MainActivity) }
                 LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.stopPolling(); vm.stopPhoneScan() }
                 // 警報の通知の許可（Android 13以降）。はじめて開いたときに1回だけ聞く
                 val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }

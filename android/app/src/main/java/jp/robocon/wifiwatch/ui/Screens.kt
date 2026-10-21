@@ -607,6 +607,7 @@ private fun PushSettings() {
             !push.configured -> "未設定：このアプリは Firebase の設定ファイル（google-services.json）なしで組み立てられています。"
             push.subscribed == true -> "受け取り中：アプリを閉じていても、警告・緊急は音とバイブで通知欄に出ます。"
             push.subscribed == false -> "登録できません：${push.error ?: "Google Play 開発者サービスを確かめてください"}"
+            push.slow -> "登録に時間がかかっています。インターネットにつながっているか確かめて、アプリを閉じて開き直してください。"
             else -> "登録しています…"
         },
         fontSize = 13.sp, color = if (push.configured && push.subscribed != false) w.ink2 else w.warnInk,

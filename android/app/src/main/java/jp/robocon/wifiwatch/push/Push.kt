@@ -32,10 +32,13 @@ object Push {
     const val CH_INFO = "alert_info"
     const val CH_RESOLVED = "alert_resolved"
 
-    data class Status(val configured: Boolean, val subscribed: Boolean?, val error: String?)
+    /** subscribed：true 登録できた・false できなかった・null 登録中。slow：登録の返事が30秒来ない（初めての登録で起きた）。 */
+    data class Status(val configured: Boolean, val subscribed: Boolean?, val error: String?, val slow: Boolean = false)
 
     private val _status = MutableStateFlow(Status(false, null, null))
     val status: StateFlow<Status> = _status
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingSince = 0L
 
     fun configured(c: Context) = FirebaseApp.getApps(c).isNotEmpty()
 
@@ -62,16 +65,32 @@ object Push {
         ))
     }
 
-    /** トピックに登録する（アプリを開くたびに呼ぶ。登録済みでも害はない）。 */
+    /**
+     * トピックに登録する。アプリを前面に出すたびに呼ぶ（登録済みでも害はない）。
+     * 初めての登録は、端末の登録（トークン作り）を待つので、返事がなかなか来ないことがある（実機で「登録しています…」の
+     * まま止まり、アプリを開き直したら届いた）。前の登録が終わっていなければ、前面に出たときにもう一度頼み直す。
+     * 一度できたら端末に覚え、次に開いたときは返事を待つ間も「受け取り中」と出す。
+     */
     fun subscribe(c: Context) {
         if (!configured(c)) {
             _status.value = Status(false, null, null)
             return
         }
-        _status.value = _status.value.copy(configured = true)
+        val prefs = c.applicationContext.getSharedPreferences("push", Context.MODE_PRIVATE)
+        val before = prefs.getBoolean("subscribed", false)
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (_status.value.subscribed == null && _status.value.configured && now - pendingSince < 10_000) return // 頼んだばかり
+        pendingSince = now
+        _status.value = Status(true, if (before) true else null, null)
         FirebaseMessaging.getInstance().subscribeToTopic(TOPIC).addOnCompleteListener { t ->
+            pendingSince = 0
+            if (t.isSuccessful) prefs.edit().putBoolean("subscribed", true).apply()
             _status.value = Status(true, t.isSuccessful, t.exception?.message)
         }
+        main.postDelayed({
+            // 30秒たっても返事が無い（この頼みがまだ終わっていない）。前に一度もできていなければ、そう出す
+            if (pendingSince == now && !before) _status.value = _status.value.copy(slow = true)
+        }, 30_000)
     }
 
     /** 通知欄に出す（アプリが開いているときに届いたもの、と、このスマホでの試し）。 */
