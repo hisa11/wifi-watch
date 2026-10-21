@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# wifiwatch をこのPCで起動する（開発PC・お試し用）。本番のミニPCは deploy/ の pm2 で動かす。
+# wifiwatch をこのPCで起動する。使うときにコマンドで起動し、Ctrl-C で止める（電源を入れただけでは立ち上がらない）。
 #
-#   ./start.sh              どれで動かすか聞く
-#   ./start.sh scan         本物の2.4/5GHz（スキャンだけのモード）。Wi-Fiはつながったまま。sudoが要る
-#   ./start.sh monitor      本物（モニタモード）。動いている間このPCのWi-Fiは切れる。sudoが要る
+#   ./start.sh pit          本番のミニPC（AX210・config.json）。モニタモード。動いている間この無線のWi-Fiは切れ、
+#                           止めると元に戻る。sudoが要る（合否ゲートが不合格なら --scan-only を付ける）
+#   ./start.sh              開発PC：どれで動かすか聞く
+#   ./start.sh scan         開発PC：本物の2.4/5GHz（スキャンだけのモード）。Wi-Fiはつながったまま。sudoが要る
+#   ./start.sh monitor      開発PC：本物（モニタモード）。動いている間このPCのWi-Fiは切れる。sudoが要る
 #   ./start.sh fake         偽の無線（見本の会場）。sudoも無線も使わない
 #
-#   --if <IF名>             無線のIF名（省略すると自動で探す。例：wlo1）
+#   --if <IF名>             無線のIF名（pit は config.json の interface。ほかは省略すると自動で探す）
+#   --scan-only             pit を、モニタモードではなくスキャンだけのモードで動かす（Wi-Fiはつながったまま）
 #   --no-browser            ブラウザを開かない
 #
-# 画面は http://127.0.0.1:8080 。Ctrl-C で止める（root の補助 radiod も止める）。
+# 画面は http://127.0.0.1:8080 。Ctrl-C で止める（root の補助 radiod も止め、無線を元に戻す）。
 # 受信専用（送信・注入はしない）。スキャンだけのモードはパッシブスキャンだけ。
 set -u
 ROOT=$(cd "$(dirname "$0")" && pwd)
@@ -21,12 +24,14 @@ SOCK="${WIFIWATCH_RADIOD_SOCK:-/run/wifiwatch/radiod.sock}"
 MODE=""
 IF=""
 BROWSER=1
+SCAN_ONLY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    scan|monitor|fake) MODE="$1" ;;
+    pit|scan|monitor|fake) MODE="$1" ;;
     --if) IF="${2:-}"; shift ;;
+    --scan-only) SCAN_ONLY=1 ;;
     --no-browser) BROWSER=0 ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "知らない引数です：$1（./start.sh --help）"; exit 2 ;;
   esac
   shift
@@ -54,6 +59,18 @@ if [[ -z "$MODE" ]]; then
     1) MODE=scan ;; 2) MODE=monitor ;; 3) MODE=fake ;;
     *) echo "1〜3で選んでください"; exit 2 ;;
   esac
+fi
+
+# ------------------------------------------------------------ 本番のミニPC（config.json）
+if [[ "$MODE" == "pit" ]]; then
+  CFG_PIT="$ROOT/config.json"
+  [[ -f "$CFG_PIT" ]] || { echo "config.json がありません。先に deploy/setup.sh を動かしてください"; exit 2; }
+  read -r KIND CIF < <("$PY" -c "import json,sys; c=json.load(open(sys.argv[1])); print((c.get('radio') or {}).get('kind','fake'), c.get('interface','wlan0'))" "$CFG_PIT")
+  if [[ "$KIND" != "radiod" ]]; then
+    echo "config.json の radio.kind が \"$KIND\" です。本番は \"radiod\" にしてください（deploy/setup.sh で直せます）"
+    exit 2
+  fi
+  [[ -n "$IF" ]] || IF="$CIF"
 fi
 
 find_if() {
@@ -116,10 +133,22 @@ if [[ "$MODE" == "monitor" ]]; then
   open_browser
   exec "$ROOT/tools/devpc_monitor.sh" "$IF"
 fi
+if [[ "$MODE" == "pit" && $SCAN_ONLY -eq 0 ]]; then
+  # 本番：AX210 そのものをモニタにする（合否ゲートと同じ）。止めると管理モードに戻して NetworkManager に返す
+  mkdir -p "$ROOT/data"
+  open_browser
+  exec "$ROOT/tools/devpc_monitor.sh" "$IF" --config "$CFG_PIT" --no-vif --log "$ROOT/data/radiod.log"
+fi
 
 # ------------------------------------------------------------ スキャンだけのモード（Wi-Fiはつながったまま）
-ensure_dev_config
-LOG="$ROOT/data/devpc/radiod.log"
+if [[ "$MODE" == "pit" ]]; then
+  CFG_DEV="$CFG_PIT"
+  LOG="$ROOT/data/radiod.log"
+  mkdir -p "$ROOT/data"
+else
+  ensure_dev_config
+  LOG="$ROOT/data/devpc/radiod.log"
+fi
 echo "本物の2.4/5GHzを、スキャンだけのモードで見ます（$IF。Wi-Fiはつながったまま）。"
 echo "root の補助（radiod）を起動するので、sudo のパスワードを聞かれます。"
 sudo -v || exit 1

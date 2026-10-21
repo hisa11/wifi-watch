@@ -5,17 +5,20 @@
 
 ## 0. 準備（ミニPC）
 
+手順の全体は README の「本番のミニPCのセットアップ」。
+
 ```bash
-sudo apt install iw ieee-data python3-venv nodejs npm
-sudo npm install -g pm2
-git clone <このリポジトリ> ~/wifi-watch
+sudo apt install iw ieee-data python3-venv
+git clone https://github.com/hisa11/wifi-watch.git ~/wifi-watch
 cd ~/wifi-watch && deploy/setup.sh wlan0      # IF名は ip -br link で確かめる（例：wlp2s0）
+cd ~/wifi-watch && ./start.sh pit              # 起動。止めるときは Ctrl-C（無線を管理モードに戻す）
 ```
 
-`setup.sh` は sudo が要る段（グループ、NetworkManagerの管理外、合否ゲート、pm2）を1つずつ確認してから実行する。
+`setup.sh` は sudo が要る段（警報音のグループ、合否ゲート）を1つずつ確認してから実行する。常駐はさせず、PCに残るネットワークの設定も書かない。
 
-`hwprobe` を使う間は、本体の受信と取り合わないよう止めておく：`sudo pm2 stop wifiwatch-radiod wifiwatch`（終わったら `sudo pm2 start all`）。
-`hwprobe` はモニタモードのIFに対して使う（合否ゲートのあとはモニタモードのまま）。
+`hwprobe` を使う間は、本体の受信と取り合わないよう `./start.sh pit` を Ctrl-C で止めておく。
+`hwprobe` はモニタモードのIFに対して使う（`sudo nmcli device set wlan0 managed no` のあと `sudo deploy/gate.sh wlan0` を動かすとモニタモードのまま終わる。
+終わったら `sudo ip link set wlan0 down && sudo iw dev wlan0 set type managed && sudo ip link set wlan0 up && sudo nmcli device set wlan0 managed yes` で戻す）。
 
 ## 0'. 開発PC（6GHz非対応の無線）で、本物の2.4/5GHzを見る
 
@@ -74,7 +77,7 @@ sudo deploy/gate.sh wlan0
 ```
 
 - 合格：6GHzの24ch（5955〜6415MHz）がすべて disabled なしで並び、モニタモードで `iw dev wlan0 set freq 5955` が通る。終了コード0。
-- 不合格なら：radiod を `--scan-only` で動かす（`sudo WIFIWATCH_USER=$USER WIFIWATCH_SCAN_ONLY=1 pm2 start deploy/ecosystem.config.js`）。画面の上に「見ていない：活動量・リトライ率・deauth・160MHz受信（スキャンだけのモード）」と出る。
+- 不合格なら：スキャンだけのモードで動かす（`./start.sh pit --scan-only`）。画面の上に「見ていない：活動量・リトライ率・deauth・160MHz受信（スキャンだけのモード）」と出る。
 - あわせて記録：160MHz（`set freq 5955 160 6025`）に合わせられたか。
 
 ## 2. 6GHzでフレームが受かるか（20MHz）

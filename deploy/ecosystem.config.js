@@ -1,4 +1,5 @@
-// pm2 の設定（仕様書「sudo pm2 で常駐させる」）。
+// pm2 の設定（仕様書「sudo pm2 で常駐させる」）。2026-10-21 からは使わない：本番も ./start.sh pit で起動し、Ctrl-C で止める
+// （常駐させると止めても再起動しても無線が戻らなかった。docs/DECISIONS.md）。常駐させたいときだけ使う。
 //   sudo WIFIWATCH_USER=<ユーザー名> pm2 start deploy/ecosystem.config.js
 // radiod（無線の補助）は root、本体（解析・API・中継・通知）は普通のユーザーで動かす。
 const path = require("path");

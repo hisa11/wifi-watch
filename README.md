@@ -12,8 +12,9 @@ NHK高専ロボコン全国大会のピットで、会場の Wi-Fi（6GHz帯が�
 
 ## 本番のミニPCのセットアップ
 
-前提：Ubuntu などの Linux、Python 3.10 以上、Intel AX210。AX210 は監視専用になるので、インターネット（中継・通知）は
-スマホのUSBテザリングか有線LANで取る。
+前提：Ubuntu などの Linux、Python 3.10 以上、Intel AX210。動いている間 AX210 は監視専用になる（その無線の Wi-Fi は切れる）ので、
+インターネット（中継・通知）はスマホのUSBテザリングか有線LANで取る。常駐はさせない：**使うときに `./start.sh pit` で起動し、
+Ctrl-C で止める**と、無線は普通の Wi-Fi に戻る。
 
 ### 1. 取ってくる・足りないものを入れる
 
@@ -22,11 +23,7 @@ git clone https://github.com/hisa11/wifi-watch.git ~/wifi-watch
 ```
 
 ```bash
-sudo apt install iw ieee-data python3-venv nodejs npm
-```
-
-```bash
-sudo npm install -g pm2
+sudo apt install iw ieee-data python3-venv
 ```
 
 ### 2. 無線のIF名を確かめる
@@ -44,15 +41,16 @@ cd ~/wifi-watch && deploy/setup.sh wlp2s0
 ```
 
 1回目は `config.json` を作って止まる。次の「4」を書いてから、もう一度同じコマンドを動かす。2回目は、sudo が要る段を1つずつ確かめながら進む：
-Python の仮想環境と依存 → グループ（`wifiwatch`・`dialout`。反映には一度ログアウト）→ AX210 を NetworkManager の管理から外す
-（このPCの Wi-Fi は使えなくなる）→ 合否ゲート（6GHz でモニタモードにできるか。不合格ならスキャンだけのモードで動かす）→ pm2 で常駐。
+Python の仮想環境と依存 → `config.json` を本物の無線（`radio.kind` を `"radiod"`、`interface` を手順2の名前）に直す →
+警報音を使うなら `dialout` グループ → 合否ゲート（6GHz でモニタモードにできるか。終わったら無線を元に戻す）。
+PCに残るネットワークの設定は書かない。
 
 ### 4. config.json を書く（git には入らない）
 
 | 項目 | 書くこと |
 | --- | --- |
-| `interface` | 手順2の名前 |
-| `radio.kind` | `"radiod"` |
+| `interface` | 手順2の名前（setup.sh が直す） |
+| `radio.kind` | `"radiod"`（setup.sh が直す。`"fake"` のままだと偽の無線で、会場を見ない） |
 | `device_name` | 例 `"pit-pc"` |
 | `own` | 自チームの名前・ch（例 `"6g37"`）・幅・予備ch。自チームのAP（`bssids`・`ssids`）は、あとから画面の「設定」で登録してもよい |
 | `teams` | 各チームの予約表（名前・ch・予備ch・分かればSSIDの形） |
@@ -75,52 +73,20 @@ ch は帯域を付けて書く（`2g1`・`5g36`・`6g37`）。書き方の見本
   cd ~/wifi-watch && server/.venv/bin/python tools/set_notify.py config.json
   ```
 
-### 5. 動かす・止める
-
-`setup.sh` の最後で起動して保存する（`sudo pm2 save`）。PCを再起動しても立ち上がるように、1回だけ：
+### 5. 起動する・止める
 
 ```bash
-sudo pm2 startup systemd
+cd ~/wifi-watch && ./start.sh pit
 ```
 
-様子を見る・ログ・起動し直し：
-
-```bash
-sudo pm2 status
-```
-
-```bash
-sudo pm2 logs wifiwatch
-```
-
-```bash
-sudo pm2 restart all
-```
-
-画面はミニPCのブラウザで `http://127.0.0.1:8080`（このPCの中からだけ見られる）。画面の上に黄色で「偽の無線（試し）」と
-出ていたら、`config.json` の `radio.kind` が `fake` のまま。`"radiod"` に直して（`deploy/setup.sh wlp2s0` を動かすと直せる）、
-`sudo pm2 delete all` のあと起動し直す。
-
-### 止める・元に戻す
-
-pm2 は root で動いているので、pm2 のコマンドには**毎回 `sudo` を付ける**（付けないと、空の一覧が出て止められない）。
-
-| したいこと | コマンド |
-| --- | --- |
-| 一時的に止める（あとで `sudo pm2 start all` で再開） | `sudo pm2 stop all` |
-| 常駐をやめる（pm2 の一覧から消す） | `sudo pm2 delete all` のあと `sudo pm2 save` |
-| PCを起動したときに立ち上がらないようにする | `sudo pm2 unstartup systemd` |
-| 設定を変えたあと起動し直す | `sudo pm2 restart all` |
-
-AX210 を普通の Wi-Fi に戻すとき（常駐をやめたあと）：NetworkManager の管理に戻し、モニタモードを管理モードに戻す。
-
-```bash
-sudo rm /etc/NetworkManager/conf.d/99-wifiwatch-unmanaged.conf && sudo nmcli general reload
-```
-
-```bash
-sudo ip link set wlp2s0 down && sudo iw dev wlp2s0 set type managed && sudo ip link set wlp2s0 up
-```
+- sudo のパスワードを聞かれる（無線を扱う補助 radiod は root で動く）。「続けますか？」に `y`。
+- 画面はミニPCのブラウザで `http://127.0.0.1:8080`（このPCの中からだけ見られる）。自動で開く。
+- **止めるときは、起動した端末で Ctrl-C**。radiod と本体を止め、無線を管理モードに戻して NetworkManager に返す（Wi-Fi がつなぎ直す）。
+- 合否ゲートが不合格だったときは、モニタモードではなくスキャンだけのモードで動かす（Wi-Fi はつながったまま）：
+  ```bash
+  cd ~/wifi-watch && ./start.sh pit --scan-only
+  ```
+- 画面の上に黄色で「偽の無線（試し）」と出たら、`config.json` の `radio.kind` が `fake` のまま（`deploy/setup.sh wlp2s0` で直る）。
 
 ### 6. 確かめる
 
@@ -131,6 +97,31 @@ sudo ip link set wlp2s0 down && sudo iw dev wlp2s0 set type managed && sudo ip l
 - 実機での確認の手順と合否の基準：`docs/HARDWARE_TEST.md`（合否ゲート、6GHzの受信、160MHz、アンテナ、テザリング、アプリ など）
 
 **開発PCと同時に動かさない**：同じ PC_TOKEN で2台が中継につながると、アプリからの指示を別のPCが受け取ったり、同じ警報が2台から届いたりする。本番PCで試す間は、開発PCの `./start.sh` を止める。
+
+### Wi-Fi が戻らないとき（前の版の setup.sh で pm2 の常駐をしたPC）
+
+前の版は、pm2 で常駐させ（PCの起動時にも立ち上がる）、AX210 を NetworkManager の管理から外す設定ファイルを書いていた。
+そのため、止めても再起動しても Wi-Fi が戻らない。次の1行で外して戻す（このリポジトリを取り直したあと）：
+
+```bash
+cd ~/wifi-watch && deploy/restore_wifi.sh wlp2s0
+```
+
+インターネットが無くて取り直せないときは、同じことを手で（1行ずつ）：
+
+```bash
+sudo pm2 delete all; sudo pm2 save --force; sudo pm2 unstartup systemd
+```
+
+```bash
+sudo rm -f /etc/NetworkManager/conf.d/99-wifiwatch-unmanaged.conf && sudo nmcli general reload
+```
+
+```bash
+sudo ip link set wlp2s0 down && sudo iw dev wlp2s0 set type managed && sudo ip link set wlp2s0 up && sudo nmcli device set wlp2s0 managed yes
+```
+
+それでも戻らなければ再起動する（上の3つのあとなら、再起動で元に戻る）。
 
 ## スマホのアプリ
 
@@ -162,7 +153,7 @@ cd android && ./gradlew testDebugUnitTest            # アプリ（JVMの単体�
 ```
 
 ```bash
-./start.sh fake                                      # 偽の無線で画面を動かす（scan・monitor は開発PCの本物の無線。sudo が要る）
+./start.sh fake                                      # 偽の無線で画面を動かす（scan・monitor は開発PCの本物の無線、pit は本番のミニPC。sudo が要る）
 ```
 
 開発PCでの本物の無線の使い方は `docs/HARDWARE_TEST.md` の「0'」。進み具合は `docs/PROGRESS.md`、決めたことと確かめた外部ドキュメントは `docs/DECISIONS.md`。

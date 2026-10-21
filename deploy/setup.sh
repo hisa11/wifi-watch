@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # ミニPCのセットアップ。普通のユーザーで実行し、sudo が要る段は1つずつ確認してから実行する。
+# 常駐はさせない（使うときに ./start.sh pit で起動し、Ctrl-C で止めると無線も元に戻る）。PCに残るネットワークの設定も書かない。
 #   deploy/setup.sh wlan0
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -17,16 +18,23 @@ command -v python3 >/dev/null || missing+=(python3)
 python3 -c "import venv, ensurepip" 2>/dev/null || missing+=(python3-venv)
 command -v iw >/dev/null || missing+=(iw)
 [[ -f /usr/share/ieee-data/oui.csv ]] || missing+=(ieee-data)
-command -v node >/dev/null || missing+=(nodejs)
+command -v nmcli >/dev/null || missing+=(network-manager)
 if ((${#missing[@]})); then
   echo "足りないもの: ${missing[*]}"
   echo "入れ方： sudo apt install ${missing[*]}"
-  echo "（pm2 は： sudo npm install -g pm2）"
   exit 1
 fi
 python3 -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10以上が要ります"'
-command -v pm2 >/dev/null || { echo "pm2 がありません： sudo npm install -g pm2"; exit 1; }
 echo "OK"
+
+# 前の版のセットアップが残したもの（常駐・NetworkManager の管理の外し）があれば、外す
+OLD_CONF=/etc/NetworkManager/conf.d/99-wifiwatch-unmanaged.conf
+if [[ -f "$OLD_CONF" ]] || { command -v pm2 >/dev/null && sudo -n pm2 jlist 2>/dev/null | grep -q wifiwatch; }; then
+  step "前の版の常駐・設定が残っています"
+  if ask "deploy/restore_wifi.sh $IF で外して、無線を普通の Wi-Fi に戻しますか？"; then
+    "$ROOT/deploy/restore_wifi.sh" "$IF"
+  fi
+fi
 
 step "2. Pythonの仮想環境と依存（版を固定）"
 [[ -x "$ROOT/server/.venv/bin/python" ]] || python3 -m venv "$ROOT/server/.venv"
@@ -75,36 +83,29 @@ if c.radio.kind not in ("radiod", "scan_only"):
 print("config.json OK：", c.interface, c.radio.kind)
 PY
 
-step "4. グループ（radiod のソケットと警報音のシリアル）"
-if id -nG "$ME" | grep -qw wifiwatch && id -nG "$ME" | grep -qw dialout; then
-  echo "OK（$ME は wifiwatch と dialout に入っている）"
-elif ask "sudo groupadd -f wifiwatch && sudo usermod -aG wifiwatch,dialout $ME を実行しますか？"; then
-  sudo groupadd -f wifiwatch
-  sudo usermod -aG wifiwatch,dialout "$ME"
+step "4. 警報音（USBシリアルのブザー）を使うなら dialout グループ"
+if id -nG "$ME" | grep -qw dialout; then
+  echo "OK（$ME は dialout に入っている）"
+elif ask "警報音を使いますか？（sudo usermod -aG dialout $ME を実行。使わなければ N）"; then
+  sudo usermod -aG dialout "$ME"
   echo "入れました（反映には一度ログアウトが要ります）"
 fi
 
-step "5. NetworkManagerの管理から $IF を外す（作業中のPCのWi-Fiが切れます）"
-CONF=/etc/NetworkManager/conf.d/99-wifiwatch-unmanaged.conf
-if [[ -f "$CONF" ]] && grep -q "interface-name:$IF" "$CONF"; then
-  echo "OK（$CONF）"
-elif ask "$CONF を書いて NetworkManager を読み込み直しますか？"; then
-  printf '[keyfile]\nunmanaged-devices=interface-name:%s\n' "$IF" | sudo tee "$CONF" >/dev/null
-  sudo nmcli general reload
-  echo "外しました"
+step "5. 合否ゲート（6GHzでモニタモードにできるか。終わったら無線を元に戻す）"
+if ask "sudo deploy/gate.sh $IF を実行しますか？（その間、この無線の Wi-Fi は切れます）"; then
+  sudo nmcli device set "$IF" managed no || true
+  sleep 2
+  if sudo "$ROOT/deploy/gate.sh" "$IF"; then
+    echo "合格：起動は ./start.sh pit"
+  else
+    echo "不合格：起動は ./start.sh pit --scan-only（スキャンだけのモード）"
+  fi
+  echo "無線を元に戻します"
+  sudo ip link set "$IF" down; sudo iw dev "$IF" set type managed; sudo ip link set "$IF" up
+  sudo nmcli device set "$IF" managed yes || true
 fi
 
-step "6. 合否ゲート（6GHzでモニタモードにできるか）"
-if ask "sudo deploy/gate.sh $IF を実行しますか？（NICの状態を変えます）"; then
-  if sudo "$ROOT/deploy/gate.sh" "$IF"; then echo "合格"; else echo "不合格：ecosystem.config.js が --scan-only で起動するよう WIFIWATCH_SCAN_ONLY=1 を付けて次へ"; fi
-fi
-
-step "7. pm2 で常駐（radiod は root、本体は $ME）"
-echo "起動： sudo WIFIWATCH_USER=$ME pm2 start $ROOT/deploy/ecosystem.config.js"
-echo "保存： sudo pm2 save && sudo pm2 startup systemd"
-echo "止める： sudo pm2 stop all（pm2 は root で動くので、pm2 のコマンドには毎回 sudo を付ける）"
-if ask "今すぐ起動しますか？"; then
-  sudo WIFIWATCH_USER="$ME" pm2 start "$ROOT/deploy/ecosystem.config.js"
-  sudo pm2 save
-  echo "画面： http://127.0.0.1:$("$ROOT/server/.venv/bin/python" -c "import json;print(json.load(open('$ROOT/config.json')).get('api',{}).get('port',8080))")"
-fi
+step "6. 使い方"
+echo "起動： cd $ROOT && ./start.sh pit      （動いている間 $IF の Wi-Fi は切れます。インターネットはテザリングか有線で）"
+echo "止める：起動した画面で Ctrl-C（無線を管理モードに戻し、NetworkManager に返します）"
+echo "画面： http://127.0.0.1:$("$ROOT/server/.venv/bin/python" -c "import json;print(json.load(open('$ROOT/config.json')).get('api',{}).get('port',8080))")"

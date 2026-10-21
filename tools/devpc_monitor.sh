@@ -1,20 +1,37 @@
 #!/usr/bin/env bash
-# 開発PCで、本番と同じモニタモード（radiod ＋ 本体）で動かす。動いている間、このPCの無線はアナライザー専用になり、
-# Wi-Fiの通信は切れる（NetworkManagerから外す）。Ctrl-C で止めると、管理モードに戻して NetworkManager に返す。
+# モニタモード（radiod ＋ 本体）で動かす。動いている間、この無線はアナライザー専用になり、Wi-Fiの通信は切れる
+# （その間だけ NetworkManager から外す。PCに残る設定は書かない）。Ctrl-C で止めると、管理モードに戻して NetworkManager に返す。
 # 受信専用（送信・注入はしない）。6GHzに対応していない無線では、6GHzは「見ていない（この無線では受けられない）」と出る。
-#   tools/devpc_monitor.sh [IF名]        # 既定は wlo1。画面は http://127.0.0.1:8080
+#   tools/devpc_monitor.sh [IF名]                          # 開発PC（既定 wlo1、設定は data/devpc/config.json）
+#   tools/devpc_monitor.sh wlp2s0 --config config.json --no-vif --log data/radiod.log   # 本番のミニPC（start.sh pit から）
+# 画面は http://127.0.0.1:8080
 set -u
-IF="${1:-wlo1}"
+IF="wlo1"
+CFG_ARG=""
+LOG_ARG=""
+USE_VIF=1
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config) CFG_ARG="${2:-}"; shift ;;
+    --log) LOG_ARG="${2:-}"; shift ;;
+    --no-vif) USE_VIF=0 ;;  # AX210（iwlwifi）は無線そのものをモニタにする（合否ゲートと同じ）
+    -*) echo "知らない引数です：$1"; exit 2 ;;
+    *) IF="$1" ;;
+  esac
+  shift
+done
 [[ "$IF" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || { echo "IF名が不正です: $IF"; exit 2; }
 [[ -d /sys/class/net/$IF ]] || { echo "$IF がありません（ip -br link で名前を確かめてください）"; exit 2; }
 command -v iw >/dev/null || { echo "iw がありません： sudo apt install iw"; exit 2; }
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PY="$ROOT/server/.venv/bin/python"
-CFG="${WIFIWATCH_DEVPC_CONFIG:-$ROOT/data/devpc/config.json}"
+CFG="${CFG_ARG:-${WIFIWATCH_DEVPC_CONFIG:-$ROOT/data/devpc/config.json}}"
 SOCK="${WIFIWATCH_RADIOD_SOCK:-/run/wifiwatch/radiod.sock}"
-# 別のモニタ用IFで受ける。rtw89 は IF そのものをモニタにすると前の接続のchから動かない
+# 開発PC：別のモニタ用IFで受ける。rtw89 は IF そのものをモニタにすると前の接続のchから動かない
 # （tools/devpc_monitor_check.sh で確かめた。別のモニタ用IFなら全部のchで受かる）
 MON=wwmon0
+VIF_ARGS=(--monitor-vif "$MON")
+[[ $USE_VIF -eq 1 ]] || VIF_ARGS=()
 
 if [[ ! -f "$CFG" ]]; then
   # config.example.json をもとに、この無線と radiod を使う設定を作る（gitの外）
@@ -72,10 +89,10 @@ sudo nmcli device set "$IF" managed no
 sleep 2  # NetworkManager が接続を切り終えるのを待つ（つながったままモニタにしない）
 # radiod：起動時に管理モードでパッシブスキャン → モニタモード。決まった操作だけを受ける（root）
 # server/ で動かす（wifiwatch のパッケージがそこにある。sudo は今いるフォルダを引き継ぐ）
-LOG="$ROOT/data/devpc/radiod.log"
+LOG="${LOG_ARG:-$ROOT/data/devpc/radiod.log}"
 mkdir -p "$(dirname "$LOG")"
 started=$(mktemp)
-(cd "$ROOT/server" && exec sudo "$PY" -m wifiwatch.radio.radiod --interface "$IF" --monitor-vif "$MON" --socket "$SOCK" \
+(cd "$ROOT/server" && exec sudo "$PY" -m wifiwatch.radio.radiod --interface "$IF" "${VIF_ARGS[@]}" --socket "$SOCK" \
   --group "$(id -gn)" --allow-uid "$(id -u)") >"$LOG" 2>&1 &
 RPID=$!
 # 前の起動の古いソケットではなく、今回作られたソケットを待つ
