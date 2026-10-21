@@ -19,6 +19,7 @@ class RemoteRadio(Radio):
         self.sock: socket.socket | None = None
         self.lock = threading.Lock()
         self.unreceivable: list[int] = []
+        self.disabled_freqs: list[int] = []  # その中で、無線にはあるが無効のch
         self.hello_at: float | None = None
 
     def _connect(self) -> socket.socket:
@@ -59,6 +60,7 @@ class RemoteRadio(Radio):
         r = self._json("hello")
         self.scan_only = bool(r.get("scan_only"))
         self.unreceivable = [int(f) for f in r.get("unreceivable") or []]
+        self.disabled_freqs = [int(f) for f in r.get("disabled") or []]
         self.hello_at = self.clock.monotonic()
         return r
 

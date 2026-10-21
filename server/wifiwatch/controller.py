@@ -711,7 +711,8 @@ class Controller:
                            "problem_min": self.cfg.thresholds.problem_channel_min_strong},
             "counters": dict(mon.analyzer.counters),
             "radio": {"kind": self.cfg.radio.kind, "scan_only": bool(getattr(mon.radio, "scan_only", False)),
-                      "unreceivable": list(getattr(mon.radio, "unreceivable", None) or [])},
+                      "unreceivable": list(getattr(mon.radio, "unreceivable", None) or []),
+                      "disabled": list(getattr(mon.radio, "disabled_freqs", None) or [])},
             "clients": sum(1 for c in list(mon.analyzer.table.clients.values()) if now - c.last_seen < 900),
         }
 

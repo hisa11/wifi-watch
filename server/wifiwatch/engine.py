@@ -58,6 +58,7 @@ class Engine:
         self.tune_errors = 0
         self._mode_before_manual = scheduler.mode
         self.stopping = False
+        self._tune_err_logged: dict[tuple[int, int], float] = {}
 
     def add_ticker(self, interval: float, fn: Callable[[float], None]) -> None:
         self.tickers.append(Ticker(interval, fn))
@@ -87,7 +88,12 @@ class Engine:
         except RadioError as e:
             res.error = str(e)
             self.tune_errors += 1
-            log.warning("tune failed: %s", e)
+            # 同じchの同じ失敗は10分に1回だけ書く（巡回のたびに同じ行でログが埋まらないように）
+            key = (slot.tuning.freq, slot.tuning.width)
+            now_m = self.clock.monotonic()
+            if now_m - self._tune_err_logged.get(key, -1e18) >= 600:
+                self._tune_err_logged[key] = now_m
+                log.warning("tune failed: %s（同じchの同じ失敗は10分に1回だけ書きます）", e)
             self.clock.sleep(max(0.0, end - self.clock.monotonic()))
         else:
             while not self.stopping:

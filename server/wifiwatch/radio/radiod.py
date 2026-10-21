@@ -133,7 +133,8 @@ class RadioServer:
         if op == "hello":
             return T_RESP, json.dumps({"ok": True, "result": {"pid": os.getpid(),
                                                                 "scan_only": bool(getattr(r, "scan_only", False)),
-                                                                "unreceivable": list(getattr(r, "unreceivable", []))}}).encode()
+                                                                "unreceivable": list(getattr(r, "unreceivable", [])),
+                                                                "disabled": list(getattr(r, "disabled_freqs", []))}}).encode()
         if op == "tune":
             t = validate_tuning(args.get("freq"), args.get("width"), args.get("center"))
             r.tune(t)
@@ -227,9 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         radio = LinuxRadio(args.interface, monitor_flags=args.monitor_flag, monitor_vif=args.monitor_vif)
     try:
         radio.load_hw_freqs()
-        if radio.unreceivable:
-            log.warning("この無線にないch：%d（%s）。合わせず、画面では「見ていない（この無線では受けられない）」と出します",
-                        len(radio.unreceivable), "6GHzすべて" if all(f > 5925 for f in radio.unreceivable) else "一部")
+        report_unreceivable(radio)
     except Exception as e:  # 起動は止めない
         log.warning("この無線のchの一覧を読めません：%s", e)
     if not args.no_setup and not args.scan_only:
@@ -241,6 +240,8 @@ def main(argv: list[str] | None = None) -> int:
         except RadioError as e:
             log.warning("管理モードでのスキャンに失敗：%s", e)
         radio.set_monitor()
+        radio.load_hw_freqs()
+        report_unreceivable(radio)
     srv = RadioServer(radio, args.socket, args.group, args.allow_uid)
     srv.bind()
     log.info("待ち受け：%s", args.socket)
@@ -249,6 +250,21 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         radio.close()
     return 0
+
+
+def report_unreceivable(radio: Any) -> None:
+    """受けられないch（無線にない・無効）を1回だけまとめてログに出す（合わせに行かないので、そのあとは出ない）。"""
+    unrx = list(getattr(radio, "unreceivable", []) or [])
+    if not unrx:
+        return
+    dis = set(getattr(radio, "disabled_freqs", []) or [])
+    six = [f for f in unrx if f > 5925]
+    what = "6GHzすべて" if len(six) == len(unrx) and len(six) >= 24 else f"{len(unrx)}ch"
+    if dis and dis >= set(unrx):
+        log.warning("この無線で無効のch：%s（国の設定・ファームウェアが許していない）。合わせず、画面では「見ていない（無線で無効）」と出します。"
+                    "6GHzなら tools/sixghz_check.sh で原因を調べてください", what)
+    else:
+        log.warning("この無線にない・無効のch：%s。合わせず、画面では「見ていない（この無線では受けられない）」と出します", what)
 
 
 if __name__ == "__main__":

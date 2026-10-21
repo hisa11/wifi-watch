@@ -588,10 +588,14 @@ function blindSummary(st) {
   const out = [];
   if (st.radio && st.radio.scan_only) out.push("活動量・リトライ率・deauth・160MHz受信（スキャンだけのモード）");
   const unrx = (st.radio && st.radio.unreceivable) || [];
+  const dis = new Set((st.radio && st.radio.disabled) || []);
   for (const b of ["6", "5", "2.4"]) {
-    const n = unrx.filter((f) => bandOf(f) === b).length;
+    const fs = unrx.filter((f) => bandOf(f) === b);
+    const n = fs.length;
     if (!n) continue;
-    out.push(n === CHANNEL_COUNT[b] ? `${BAND_JP[b]}（この無線では受けられない）` : `${BAND_JP[b]}の${n}ch（この無線では受けられない）`);
+    // 無線にはあるが無効（国の設定・ファームウェアが許していない）のか、無線にそもそも無いのかを分けて書く
+    const why = fs.every((f) => dis.has(f)) ? "この無線で今は無効" : "この無線では受けられない";
+    out.push(n === CHANNEL_COUNT[b] ? `${BAND_JP[b]}（${why}）` : `${BAND_JP[b]}の${n}ch（${why}）`);
   }
   for (const b of st.excluded_bands) out.push(`${BAND_JP[b]}（巡回外）`);
   const ex = st.excluded_freqs.filter((f) => !st.excluded_bands.includes(bandOf(f)));

@@ -63,11 +63,16 @@ class LivenessMonitor:
         s = res.slot
         if s.kind in ("manual", "coldstart"):
             return
-        if s.kind == "own" and res.error:
+        # 自ブロックに合わせられない：tuneの失敗のほか、無線で無効（disabled）なので合わせに行かなかったときも同じに数える
+        # （無効のchは合わせに行かないので失敗にならないが、6GHzが無効のままでは自chを見られない。復旧の手順で
+        # 管理モードのスキャン→国設定の確認をし、それでも無効なら理由を出して止まる）
+        disabled = set(getattr(self.radio, "disabled_freqs", None) or [])
+        own_blocked = s.kind == "own" and not res.error and res.receive_s == 0 and s.freq in disabled
+        if s.kind == "own" and (res.error or own_blocked):
             self.own_fail += 1
             if self.own_fail >= self.own_tune_failures:
                 self.own_fail = 0
-                self._recover(f"自ブロックに合わせられない（{res.error}）")
+                self._recover(f"自ブロックに合わせられない（{res.error or '無線で無効：国の設定・ファームウェアが許していない'}）")
             return
         if s.kind == "own":
             self.own_fail = 0

@@ -140,9 +140,12 @@ class LinuxRadio(Radio):
         self.sys_class_net = Path(sys_class_net)
         self.sock: socket.socket | None = None
         self.tuning: Tuning | None = None
-        # この無線（ハードウェア）にあるch。`iw phy <phy> info` に載っていないchは、受けられないので合わせない
-        # （6GHz非対応の無線の6GHzなど）。disabled（国設定で使えない）は載っているので、従来どおり合わせて失敗させ、復旧に回す
+        # この無線（ハードウェア）にあるch。`iw phy <phy> info` に載っていないch（6GHz非対応の無線の6GHzなど）と、
+        # 載っていても disabled のch（国の設定・ファームウェアが許していない。本番PCの AX210 で 6GHz が全部そうなった）は、
+        # 合わせに行かない（毎回失敗してログを埋めるだけ）。「見ていない（無線で無効）」として扱い、60秒ごとに読み直す
         self.hw_freqs: set[int] | None = None
+        self.disabled: set[int] = set()
+        self._hw_at = 0.0
         self.unreceivable_tuned = False
         self.tune_style: dict[int, int] = {}  # 幅 → 通った候補の番号
         self.buf = bytearray(8192)
@@ -207,21 +210,30 @@ class LinuxRadio(Radio):
             return {}
         info = self._cmd(["iw", "phy", phy, "info"], 5.0, check=False)
         freqs = parse_phy_freqs(info.out) if info.rc == 0 else {}
+        self._hw_at = self.clock.monotonic()
         if freqs:
             self.hw_freqs = set(freqs)
+            self.disabled = {f for f, ok in freqs.items() if not ok}
         return freqs
 
     @property
     def unreceivable(self) -> list[int]:
-        """この無線にないch（画面で「見ていない」の理由として出す）。分からなければ空。"""
+        """この無線にないchと、無効（disabled）のch（画面で「見ていない」の理由として出す）。分からなければ空。"""
         if self.hw_freqs is None:
             return []
-        return [f for f in ch.ALL_FREQS if f not in self.hw_freqs]
+        return [f for f in ch.ALL_FREQS if f not in self.hw_freqs or f in self.disabled]
+
+    @property
+    def disabled_freqs(self) -> list[int]:
+        """この無線にあるが、今は無効のch（国の設定・ファームウェアが許していない）。"""
+        return [f for f in ch.ALL_FREQS if f in self.disabled]
 
     # ------------------------------------------------------------ 受信
     def tune(self, tuning: Tuning) -> None:
-        if self.hw_freqs is not None and tuning.freq not in self.hw_freqs:
-            # この無線にないch：合わせない（失敗にもしない）。受信していた秒は0で返す
+        if self.hw_freqs is not None and self.clock.monotonic() - self._hw_at > 60:
+            self.load_hw_freqs()  # 無効だったchが使えるようになったか（国の設定が変わったときなど）
+        if self.hw_freqs is not None and (tuning.freq not in self.hw_freqs or tuning.freq in self.disabled):
+            # この無線にない・無効のch：合わせない（失敗にもしない）。受信していた秒は0で返す
             self.tuning = tuning
             self.unreceivable_tuned = True
             return
@@ -241,6 +253,12 @@ class LinuxRadio(Radio):
                 self._drain()
                 return
             errors.append((r.err or r.out).strip()[:120])
+        if any("disabled" in e for e in errors) and self.hw_freqs is not None:
+            self.load_hw_freqs()  # 無効になったのかもしれない：読み直して、無効なら合わせずに「見ていない」にする
+            if tuning.freq in self.disabled:
+                self.tuning = tuning
+                self.unreceivable_tuned = True
+                return
         raise RadioError(f"{ch.label(tuning.freq)} {tuning.width}MHzに合わせられません：{' / '.join(errors)}")
 
     def capture(self, duration: float) -> FrameBatch:

@@ -366,3 +366,39 @@ def test_separate_monitor_vif(sysnet):
     assert run.calls[-1] == ["ip", "link", "set", "wwmon0", "up"]
     with pytest.raises(RadioError):
         LinuxRadio("wlan0", RealClock(), runner=run, sys_class_net=str(sysnet), monitor_vif="wlan0")
+
+
+class PhyDisabled6Runner(PhyNo6Runner):
+    """AX210 で、6GHzは載っているが全部 disabled（国の設定・ファームウェアが許していない）。合わせると失敗する。"""
+
+    six_ok = False
+
+    def __call__(self, argv, timeout):
+        if argv[:2] == ["iw", "phy"] and argv[-1] == "info":
+            lines = ["\t\t\t* 2412.0 MHz [1] (22.0 dBm)", "\t\t\t* 5180.0 MHz [36] (22.0 dBm)"]
+            lines += [f"\t\t\t* {f}.0 MHz [{(f - 5950) // 5}] " + ("(22.0 dBm)" if self.six_ok else "(disabled)")
+                      for f in ch.FREQS_BY_BAND[ch.BAND_6]]
+            self.calls.append(argv)
+            return RunResult(0, "\n".join(lines), "")
+        if argv[:2] == ["iw", "dev"] and "set" in argv and int(argv[argv.index("freq") + 1]) > 5925 and not self.six_ok:
+            self.calls.append(argv)
+            return RunResult(1, "", "command failed: Invalid argument (-22) / kernel reports: (extension) channel is disabled")
+        return super().__call__(argv, timeout)
+
+
+def test_disabled_channels_are_not_tuned_and_recover_when_enabled(sysnet):
+    # 本番PCの AX210 で、6GHz が全部「channel is disabled」になり、巡回のたびに失敗してログが埋まった
+    run = PhyDisabled6Runner()
+    r, _ = make_linux(run, sysnet)
+    r.load_hw_freqs()
+    six = list(ch.FREQS_BY_BAND[ch.BAND_6])
+    assert r.disabled_freqs == six and set(six) <= set(r.unreceivable)  # 「見ていない（無線で無効）」として扱う
+    run.calls.clear()
+    r.tune(validate_tuning(F("6g37"), 20, F("6g37")))
+    assert not any("set" in c for c in run.calls)  # 合わせに行かない（失敗にもしない）
+    assert r.capture(0.05).receive_s == 0
+    # 国の設定が変わって使えるようになったら、60秒ごとの読み直しで戻る
+    run.six_ok = True
+    r._hw_at = -1e9  # 60秒たったことにする
+    r.tune(validate_tuning(F("6g37"), 20, F("6g37")))
+    assert r.disabled_freqs == [] and not r.unreceivable_tuned
