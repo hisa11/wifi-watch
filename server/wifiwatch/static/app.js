@@ -521,7 +521,9 @@ function renderTop(st) {
   clear($("rxState")).append(h("span", { class: `dot ${rx === "ok" ? "ok" : rx === "failed" ? "crit" : "warn"}` }),
     h("span", { text: RX_JP[rx] || rx }));
   for (const b of $("modeSwitch").querySelectorAll("button")) b.setAttribute("aria-checked", String(b.dataset.mode === st.mode));
-  clear($("coverage")).append(...blind.map((t) => h("span", { class: "chip-blind", title: "この帯域・chは見ていません（検知なし、ではありません）", text: `見ていない：${t}` })));
+  const cov = clear($("coverage"));
+  if (st.radio?.kind === "fake") cov.append(h("span", { class: "chip-fake", title: "config.json の radio.kind が fake です。会場の電波ではありません（本番は radiod）", text: "偽の無線（試し）：会場の電波ではありません" }));
+  cov.append(...blind.map((t) => h("span", { class: "chip-blind", title: "この帯域・chは見ていません（検知なし、ではありません）", text: `見ていない：${t}` })));
   const links = clear($("links"));
   if (st.notify) {
     const n = st.notify;

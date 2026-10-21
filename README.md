@@ -97,7 +97,30 @@ sudo pm2 logs wifiwatch
 sudo pm2 restart all
 ```
 
-画面はミニPCのブラウザで `http://127.0.0.1:8080`（このPCの中からだけ見られる）。
+画面はミニPCのブラウザで `http://127.0.0.1:8080`（このPCの中からだけ見られる）。画面の上に黄色で「偽の無線（試し）」と
+出ていたら、`config.json` の `radio.kind` が `fake` のまま。`"radiod"` に直して（`deploy/setup.sh wlp2s0` を動かすと直せる）、
+`sudo pm2 delete all` のあと起動し直す。
+
+### 止める・元に戻す
+
+pm2 は root で動いているので、pm2 のコマンドには**毎回 `sudo` を付ける**（付けないと、空の一覧が出て止められない）。
+
+| したいこと | コマンド |
+| --- | --- |
+| 一時的に止める（あとで `sudo pm2 start all` で再開） | `sudo pm2 stop all` |
+| 常駐をやめる（pm2 の一覧から消す） | `sudo pm2 delete all` のあと `sudo pm2 save` |
+| PCを起動したときに立ち上がらないようにする | `sudo pm2 unstartup systemd` |
+| 設定を変えたあと起動し直す | `sudo pm2 restart all` |
+
+AX210 を普通の Wi-Fi に戻すとき（常駐をやめたあと）：NetworkManager の管理に戻し、モニタモードを管理モードに戻す。
+
+```bash
+sudo rm /etc/NetworkManager/conf.d/99-wifiwatch-unmanaged.conf && sudo nmcli general reload
+```
+
+```bash
+sudo ip link set wlp2s0 down && sudo iw dev wlp2s0 set type managed && sudo ip link set wlp2s0 up
+```
 
 ### 6. 確かめる
 

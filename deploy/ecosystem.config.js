@@ -9,6 +9,11 @@ const py = path.join(root, "server", ".venv", "bin", "python");
 const cfg = JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8"));
 const user = process.env.WIFIWATCH_USER || process.env.SUDO_USER;
 if (!user) throw new Error("WIFIWATCH_USER（本体を動かすユーザー）を指定してください");
+// 本番の常駐で偽の無線（config.example.json の既定）を動かさない。試しに偽の無線で常駐させるときだけ WIFIWATCH_ALLOW_FAKE=1
+const kind = (cfg.radio || {}).kind || "fake";
+if (kind === "fake" && process.env.WIFIWATCH_ALLOW_FAKE !== "1") {
+  throw new Error('config.json の radio.kind が "fake"（偽の無線）です。本番は "radiod" にしてください（deploy/setup.sh で直せます）');
+}
 const iface = cfg.interface || "wlan0";
 if (!/^[A-Za-z0-9_.-]{1,15}$/.test(iface)) throw new Error("interface が不正です");
 const flags = ((cfg.radio || {}).monitor_flags || []).flatMap((f) => ["--monitor-flag", f]);

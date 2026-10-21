@@ -146,6 +146,7 @@ h3 { font-size: 13px; margin: 0 0 6px; font-weight: 650; }
 .mode-switch button[aria-checked="true"] { background: var(--ink); color: var(--surface); }
 .mode-switch button[aria-checked="true"] small { color: var(--surface-3); }
 .coverage { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chip-fake { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--warn); color: #0b0b0b; }
 .chip-blind {
   display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px;
   background: repeating-linear-gradient(135deg, var(--hatch-bg) 0 4px, transparent 4px 8px), var(--surface-2);

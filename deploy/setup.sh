@@ -40,6 +40,27 @@ if [[ ! -f "$ROOT/config.json" ]]; then
   echo "interface を \"$IF\"、radio.kind を \"radiod\" にしてから、もう一度実行してください。"
   exit 0
 fi
+# 本番は本物の無線（radiod）。config.example.json から作ったままだと偽の無線（fake）なので、ここで直す
+KIND=$("$ROOT/server/.venv/bin/python" -c "import json,sys; c=json.load(open(sys.argv[1])); print((c.get('radio') or {}).get('kind','fake'), c.get('interface',''))" "$ROOT/config.json")
+read -r CUR_KIND CUR_IF <<<"$KIND"
+if [[ "$CUR_KIND" == "fake" || "$CUR_IF" != "$IF" ]]; then
+  echo "config.json：radio.kind=$CUR_KIND、interface=$CUR_IF（本番は radio.kind=radiod、interface=$IF）"
+  if ask "config.json を radio.kind=\"radiod\"、interface=\"$IF\" に直しますか？"; then
+    "$ROOT/server/.venv/bin/python" - "$ROOT/config.json" "$IF" <<'PY'
+import json, os, sys
+p, iface = sys.argv[1], sys.argv[2]
+c = json.load(open(p, encoding="utf-8"))
+c["interface"] = iface
+c.setdefault("radio", {})["kind"] = "radiod"
+tmp = p + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(c, f, ensure_ascii=False, indent=1)
+os.chmod(tmp, 0o600)
+os.replace(tmp, p)
+print("直しました")
+PY
+  fi
+fi
 "$ROOT/server/.venv/bin/python" - "$ROOT/config.json" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1].rsplit("/", 1)[0] + "/server")
@@ -49,7 +70,8 @@ try:
 except ConfigError as e:
     print(e); sys.exit(1)
 if c.radio.kind not in ("radiod", "scan_only"):
-    print(f"注意：radio.kind が {c.radio.kind} です（実機では \"radiod\"）")
+    print(f"止めます：radio.kind が {c.radio.kind} です。本番は \"radiod\" にしてください（偽の無線では会場を見ません）")
+    sys.exit(1)
 print("config.json OK：", c.interface, c.radio.kind)
 PY
 
@@ -80,6 +102,7 @@ fi
 step "7. pm2 で常駐（radiod は root、本体は $ME）"
 echo "起動： sudo WIFIWATCH_USER=$ME pm2 start $ROOT/deploy/ecosystem.config.js"
 echo "保存： sudo pm2 save && sudo pm2 startup systemd"
+echo "止める： sudo pm2 stop all（pm2 は root で動くので、pm2 のコマンドには毎回 sudo を付ける）"
 if ask "今すぐ起動しますか？"; then
   sudo WIFIWATCH_USER="$ME" pm2 start "$ROOT/deploy/ecosystem.config.js"
   sudo pm2 save
