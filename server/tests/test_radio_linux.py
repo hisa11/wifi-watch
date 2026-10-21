@@ -447,3 +447,20 @@ def test_link_up_is_retried_after_io_error(sysnet):
     r, _ = make_linux(run, sysnet)
     r.managed_scan()
     assert [c for c in run.calls if c == ["ip", "link", "set", "wlan0", "up"]].__len__() == 2  # 1回断られて、2回目で上がった
+
+
+def test_rtdump_shows_signal_and_radiotap_head_only(sysnet, capsys):
+    # 本番PCで 2.4GHz の強さが -2〜-12dBm と出た件を調べる道具：radiotap の強さと読み取りを並べ、頭だけを出す
+    import argparse
+    from wifiwatch import hwprobe
+    run = FakeRunner()
+    r, feed = make_linux(run, sysnet)
+    r.set_monitor()
+    r.tune = lambda t: setattr(r, "tuning", t)  # 合わせたことにする（受けたフレームを流し込む）
+    bcn = build.radiotap(F("2g1"), signal=-61, chains=[-63, -65]) + build.beacon("02:00:00:00:00:01", build.ap_ies(F("2g1"), 20, "AP1", standard="n"))
+    for _ in range(3):
+        feed.send(bcn)
+    hwprobe.cmd_rtdump(r, argparse.Namespace(chs="2g1", seconds=0.3, per_ch=1))
+    out = capsys.readouterr().out
+    assert "02:00:00:00:00:01" in out and "ドライバ=-61" in out and "アンテナごと=[-63, -65]" in out
+    assert "AP1".encode().hex() not in out  # ビーコンの中身（SSID）は出さない

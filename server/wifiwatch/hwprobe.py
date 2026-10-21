@@ -19,6 +19,7 @@ import re
 import select
 import statistics
 import sys
+import struct
 import time
 from collections import Counter
 from typing import Any
@@ -80,6 +81,45 @@ def cmd_frames(r: LinuxRadio, a: argparse.Namespace) -> int:
     for st in sorted(an.table.all(), key=lambda s: s.rssi or -200, reverse=True):
         print(f"    {st.bssid} {st.ssid or '(非公開)'!s:24} 主{ch.label(st.primary_freq)} {st.width_label}MHz "
               f"{st.rssi}dBm {st.standard} 受けたch={sorted(ch.freq_to_number(f) for f in st.seen_on)}")
+    return 0
+
+
+def cmd_rtdump(r: LinuxRadio, a: argparse.Namespace) -> int:
+    """chごとに、いくつかのAPのビーコンについて、radiotap に書かれた強さと、こちらの読み取りを並べて出す。
+    radiotap の頭（受信の情報。通信の中身ではない）だけを16進で出す。ビーコンの中身・データフレームは出さない。"""
+    for x in (y.strip() for y in a.chs.split(",") if y.strip()):
+        t = tuning_for(x, 20)
+        r.tune(t)
+        seen: dict[str, tuple] = {}
+        end = time.monotonic() + a.seconds
+        while time.monotonic() < end and len(seen) < a.per_ch:
+            b = r.capture(min(0.5, max(0.05, end - time.monotonic())))
+            for fr in b.frames:
+                try:
+                    rx = radiotap.parse(fr)
+                    h = dot11.parse_header(fr, rx.length, len(fr))
+                except (radiotap.RadiotapError, dot11.Dot11Error):
+                    continue
+                if h.ftype != 0 or h.subtype != 8 or h.addr3 is None:
+                    continue  # ビーコンだけ
+                bssid = h.addr3.hex(":")
+                if bssid in seen:
+                    continue
+                words, off = [], 4
+                while off + 4 <= rx.length:
+                    w = struct.unpack_from("<I", fr, off)[0]
+                    words.append(f"{w:08x}")
+                    off += 4
+                    if not w & 0x80000000:
+                        break
+                seen[bssid] = (rx.freq, rx.driver_signal, [s for _, s in rx.chains], rx.signal, words,
+                               bytes(fr[:min(rx.length, 64)]).hex())
+                if len(seen) >= a.per_ch:
+                    break
+        print(f"[rtdump] {ch.label(t.freq)}：ビーコン {len(seen)}局")
+        for bssid, (f, drv, chains, sig, words, hx) in seen.items():
+            print(f"  {bssid} radiotapのch={f} ドライバ={drv} アンテナごと={chains} 読み取り={sig} present={','.join(words)}")
+            print(f"    頭={hx}")
     return 0
 
 
@@ -328,6 +368,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--chs", default="2g1,2g6,2g11,5g36,5g48,5g100,5g120")
     p.add_argument("--seconds", type=float, default=2.0)
     p.add_argument("--relink", action="store_true", help="chごとにIFを下げて上げてから合わせる")
+    p = sub.add_parser("rtdump")
+    p.add_argument("--chs", default="2g1,2g6,2g11,5g36")
+    p.add_argument("--seconds", type=float, default=3.0)
+    p.add_argument("--per-ch", type=int, default=3)
     p = sub.add_parser("own-rssi")
     p.add_argument("--bssid", required=True)
     p.add_argument("--ch", default="6g37")
@@ -337,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     r = LinuxRadio(a.interface)
     try:
         return {"frames": cmd_frames, "switch": cmd_switch, "survey": cmd_survey, "eht": cmd_eht,
-                "reload-check": cmd_reload, "bench": cmd_bench, "own-rssi": cmd_own, "chancheck": cmd_chancheck}[a.cmd](r, a)
+                "reload-check": cmd_reload, "bench": cmd_bench, "own-rssi": cmd_own, "chancheck": cmd_chancheck, "rtdump": cmd_rtdump}[a.cmd](r, a)
     except RadioError as e:
         print(f"失敗：{e}", file=sys.stderr)
         return 2
