@@ -621,8 +621,8 @@ private fun PushSettings() {
         Switch(alarm, { alarm = it; Push.setAlarmMode(ctx, it) })
         Spacer(Modifier.width(8.dp))
         Column {
-            Text("緊急・警告はアラームとして鳴らす", fontWeight = FontWeight.SemiBold)
-            Text("オンにすると、おやすみモードやマナーモードでも、アラームの音量で鳴ってバイブします（おやすみモードで「アラーム」を許可しているとき）。授業中なども鳴るので、大会の間だけオンにする使い方がおすすめです。",
+            Text("緊急・警告はアラームとして知らせる（音なし）", fontWeight = FontWeight.SemiBold)
+            Text("オンにすると、おやすみモードでも、音は鳴らさずにバイブと画面の上の通知で知らせます（おやすみモードで「アラーム」を許可しているとき。着信音を消音にしていると、バイブも止まることがあります）。",
                 fontSize = 11.sp, color = w.ink2)
         }
     }

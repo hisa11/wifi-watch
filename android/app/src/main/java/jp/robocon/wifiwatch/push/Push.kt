@@ -23,8 +23,8 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * 警報のプッシュ通知（FCM）。PCが FCM に直接送り（中継は通さない）、アプリはトピックに登録しておくだけで、
  * 閉じていても届く。PCは data だけで送るので、届いたらここで通知を作る（チャネルの名前は PCの wifiwatch/fcm.py と同じ）。
- * 「アラームとして鳴らす」をオンにすると、緊急・警告をアラームのチャネル（アラームの音量・アラームの扱い）で出す。
- * おやすみモードでもアラームを許可していれば鳴り、マナーモード（着信音をバイブ・消音）でも鳴る。
+ * 「アラームとして知らせる」をオンにすると、緊急・警告を音なしのアラームのチャネル（用途・種類がアラーム）で出す。
+ * おやすみモードでも「アラーム」を許可していれば通り、音は鳴らさず、バイブと画面の上の通知だけで知らせる。
  * google-services.json が無い組み立てでは、Firebase が初期化されないので、登録もしない（設定に「未設定」と出す）。
  */
 object Push {
@@ -33,8 +33,11 @@ object Push {
     const val CH_WARN = "alert_warn"
     const val CH_INFO = "alert_info"
     const val CH_RESOLVED = "alert_resolved"
-    const val CH_ALARM_CRIT = "alarm_crit"
-    const val CH_ALARM_WARN = "alarm_warn"
+    // 音なしのアラーム（バイブと画面の上の通知だけ）。チャネルの音は作ったあと変えられないので、音ありで作っていた
+    // alarm_crit・alarm_warn（2026-10-21 の版）は消して、別の名前で作り直す
+    const val CH_ALARM_CRIT = "alarm_vib_crit"
+    const val CH_ALARM_WARN = "alarm_vib_warn"
+    private val OLD_CHANNELS = listOf("alarm_crit", "alarm_warn")
 
     /** subscribed：true 登録できた・false できなかった・null 登録中。slow：登録の返事が30秒来ない（初めての登録で起きた）。 */
     data class Status(val configured: Boolean, val subscribed: Boolean?, val error: String?, val slow: Boolean = false)
@@ -48,7 +51,7 @@ object Push {
 
     private fun prefs(c: Context) = c.applicationContext.getSharedPreferences("push", Context.MODE_PRIVATE)
 
-    /** 緊急・警告をアラームとして鳴らす（おやすみモード・マナーモードでも）。スマホごとの設定。既定はオフ。 */
+    /** 緊急・警告をアラームとして知らせる（おやすみモード・マナーモードでも、音なしでバイブと通知）。スマホごとの設定。既定はオフ。 */
     fun alarmMode(c: Context) = prefs(c).getBoolean("alarm_mode", false)
     fun setAlarmMode(c: Context, on: Boolean) = prefs(c).edit().putBoolean("alarm_mode", on).apply()
 
@@ -76,16 +79,15 @@ object Push {
         val sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         val aa = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
-        // アラーム：アラームの音量で鳴り、おやすみモードでも「アラーム」を許可していれば鳴る（Androidは用途がアラームの
-        // 通知をアラームとして扱う）。着信音のモード（バイブ・消音）の影響を受けない
+        // アラーム：音は付けず、用途だけアラームにする。Android は用途か種類がアラームの通知を「アラーム」として扱い、
+        // おやすみモードでも「アラーム」を許可していれば止めない（バイブと画面の上の通知が出る）
         val alarmAa = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
-        val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: sound
         fun ch(id: String, name: String, imp: Int, desc: String, vib: LongArray?, alarm: Boolean = false) = NotificationChannel(id, name, imp).apply {
             description = desc
             if (vib != null) {
                 enableVibration(true); vibrationPattern = vib
-                if (alarm) setSound(alarmSound, alarmAa) else setSound(sound, aa)
+                if (alarm) setSound(null, alarmAa) else setSound(sound, aa)
             } else { enableVibration(false); setSound(null, null) }
             lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
         }
@@ -95,13 +97,14 @@ object Push {
             ch(CH_WARN, "警告", NotificationManager.IMPORTANCE_HIGH, "PCが警告を出したとき", longArrayOf(0, 600, 250, 600)),
             ch(CH_INFO, "お知らせ", NotificationManager.IMPORTANCE_DEFAULT, "自chを自APに合わせた、など", longArrayOf(0, 250)),
             ch(CH_RESOLVED, "解消", NotificationManager.IMPORTANCE_LOW, "警報が解消したとき（音なし）", null),
-            ch(CH_ALARM_CRIT, "緊急の警報（アラーム）", NotificationManager.IMPORTANCE_HIGH,
-                "「アラームとして鳴らす」がオンのとき。おやすみモード・マナーモードでもアラームの音量で鳴る",
+            ch(CH_ALARM_CRIT, "緊急の警報（アラーム・音なし）", NotificationManager.IMPORTANCE_HIGH,
+                "「アラームとして知らせる」がオンのとき。おやすみモードでも、音なしでバイブと通知",
                 longArrayOf(0, 900, 300, 900, 300, 900), alarm = true),
-            ch(CH_ALARM_WARN, "警告（アラーム）", NotificationManager.IMPORTANCE_HIGH,
-                "「アラームとして鳴らす」がオンのとき。おやすみモード・マナーモードでもアラームの音量で鳴る",
+            ch(CH_ALARM_WARN, "警告（アラーム・音なし）", NotificationManager.IMPORTANCE_HIGH,
+                "「アラームとして知らせる」がオンのとき。おやすみモードでも、音なしでバイブと通知",
                 longArrayOf(0, 600, 250, 600), alarm = true),
         ))
+        for (id in OLD_CHANNELS) nm.deleteNotificationChannel(id)
     }
 
     /**
@@ -157,5 +160,5 @@ object Push {
 
     /** 設定画面の「このスマホで試しに鳴らす」（PCもFCMも使わない。今の設定での、警告の鳴り方の確かめ）。 */
     fun testLocal(c: Context) = show(c, channelFor(c, "warn", "raised", null), "wifiwatch・通知のテスト",
-        if (alarmMode(c)) "このスマホで鳴らしました（警告をアラームとして）。" else "このスマホで鳴らしました（警告と同じ鳴り方）。", "local-test")
+        if (alarmMode(c)) "このスマホで知らせました（警告をアラームとして・音なし）。" else "このスマホで鳴らしました（警告と同じ鳴り方）。", "local-test")
 }
