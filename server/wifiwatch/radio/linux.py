@@ -320,7 +320,19 @@ class LinuxRadio(Radio):
 
     # ------------------------------------------------------------ モードと復旧
     def _link(self, up: bool, dev: str | None = None) -> None:
-        self._cmd(["ip", "link", "set", dev or self.ifname, "up" if up else "down"])
+        argv = ["ip", "link", "set", dev or self.ifname, "up" if up else "down"]
+        if not up:
+            self._cmd(argv)
+            return
+        # モニタ用IFを消した直後などは、無線の準備が間に合わず「Input/output error」で断られることがある
+        # （2026-10-21 本番PCの AX210 で出た）。少し待って上げ直す
+        for i in range(4):
+            r = self._cmd(argv, check=False)
+            if r.rc == 0:
+                return
+            if i < 3:
+                time.sleep(1.0 + i)
+        raise RadioError(f"{dev or self.ifname} を上げられません：{(r.err or r.out).strip()[:120]}")
 
     def _drop_vif(self) -> None:
         """別のモニタ用IFがあれば消す。"""

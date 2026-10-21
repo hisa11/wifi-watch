@@ -35,7 +35,7 @@ fi
 echo; echo "== 3. 管理モードに戻す"
 run sudo ip link set "$IF" down
 run sudo iw dev "$IF" set type managed
-run sudo ip link set "$IF" up
+for _ in 1 2 3 4; do run sudo ip link set "$IF" up && break; sleep 2; done  # 直後は Input/output error のことがある
 run sudo nmcli device set "$IF" managed yes
 
 echo

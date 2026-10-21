@@ -429,3 +429,21 @@ def test_keep_regdom_brings_monitor_vif_up_before_taking_managed_down(sysnet):
     assert seq.index("iw dev wlan0 scan passive") < seq.index("iw phy phy0 interface add wwmon0 type monitor")
     with pytest.raises(RadioError):
         LinuxRadio("wlan0", RealClock(), runner=run, keep_regdom=True)  # 別のモニタ用IFが要る
+
+
+def test_link_up_is_retried_after_io_error(sysnet):
+    # モニタ用IFを消した直後、管理モードのIFを上げると「Input/output error」で断られた（本番PCの AX210）。少し待って上げ直す
+    class FlakyUp(FakeRunner):
+        fails = 1
+
+        def __call__(self, argv, timeout):
+            if list(argv) == ["ip", "link", "set", "wlan0", "up"] and self.fails:
+                self.fails -= 1
+                self.calls.append(list(argv))
+                return RunResult(2, "", "RTNETLINK answers: Input/output error")
+            return super().__call__(argv, timeout)
+
+    run = FlakyUp()
+    r, _ = make_linux(run, sysnet)
+    r.managed_scan()
+    assert [c for c in run.calls if c == ["ip", "link", "set", "wlan0", "up"]].__len__() == 2  # 1回断られて、2回目で上がった

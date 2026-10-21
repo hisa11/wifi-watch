@@ -34,7 +34,8 @@ restore() {
   restored=1
   echo; echo "== 元に戻します"
   [[ -d /sys/class/net/$MON ]] && sudo iw dev "$MON" del
-  sudo ip link set "$IF" down; sudo iw dev "$IF" set type managed; sudo ip link set "$IF" up
+  sudo ip link set "$IF" down; sudo iw dev "$IF" set type managed
+  for _ in 1 2 3 4; do sudo ip link set "$IF" up && break; sleep 2; done  # 消した直後は Input/output error のことがある
   sudo nmcli device set "$IF" managed yes
   echo "戻しました。結果：$OUT"
 }
@@ -78,7 +79,7 @@ rm -f /tmp/sixghz_err.$$
 echo "  6GHz のPSC（ch5・21・37・53・69・85）で2秒ずつ受けたフレーム："
 (cd "$ROOT/server" && sudo "$PY" -m wifiwatch.hwprobe --interface "$MON" chancheck --chs 6g5,6g21,6g37,6g53,6g69,6g85 --seconds 2 2>&1 | grep -E "6GHz ch" | awk '{print "   " $1, $2, "フレーム", $4, $NF}')
 sudo ip link set "$MON" down; sudo iw dev "$MON" del
-sudo ip link set "$IF" up
+for _ in 1 2 3 4; do sudo ip link set "$IF" up && break; sleep 2; done  # 消した直後は Input/output error のことがある
 n=$(sudo iw dev "$IF" scan passive 2>/dev/null | grep -c '^BSS ' || true)
 sudo ip link set "$IF" down; sudo iw dev "$IF" set type monitor; sudo ip link set "$IF" up; sleep 3
 echo "D. 前のやり方：$IF を下ろしてそのままモニタにしたあと"; six

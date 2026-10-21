@@ -79,7 +79,7 @@ restore() {
   [[ -d /sys/class/net/$MON ]] && sudo iw dev "$MON" del
   sudo ip link set "$IF" down
   sudo iw dev "$IF" set type managed
-  sudo ip link set "$IF" up
+  for _ in 1 2 3 4; do sudo ip link set "$IF" up && break; sleep 2; done  # 消した直後は Input/output error のことがある
   sudo nmcli device set "$IF" managed yes
   echo "戻しました（NetworkManager がつなぎ直します）。"
 }

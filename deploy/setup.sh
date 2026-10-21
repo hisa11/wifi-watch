@@ -102,7 +102,8 @@ if ask "sudo deploy/gate.sh $IF を実行しますか？（その間、この無
   fi
   echo "無線を元に戻します"
   [[ -d /sys/class/net/wwmon0 ]] && sudo iw dev wwmon0 del
-  sudo ip link set "$IF" down; sudo iw dev "$IF" set type managed; sudo ip link set "$IF" up
+  sudo ip link set "$IF" down; sudo iw dev "$IF" set type managed
+  for _ in 1 2 3 4; do sudo ip link set "$IF" up && break; sleep 2; done  # 消した直後は Input/output error のことがある
   sudo nmcli device set "$IF" managed yes || true
 fi
 
