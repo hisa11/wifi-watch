@@ -76,7 +76,9 @@ cd ~/wifi-watch/server && .venv/bin/python -m wifiwatch --config ../data/devpc/c
 sudo deploy/gate.sh wlan0
 ```
 
-- 合格：6GHzの24ch（5955〜6415MHz）がすべて disabled なしで並び、モニタモードで `iw dev wlan0 set freq 5955` が通る。終了コード0。
+- 合格：6GHzの24ch（5955〜6415MHz）がすべて disabled なしで並び、モニタ用IF（wwmon0）で `iw dev wwmon0 set freq 5955` が通る。終了コード0。
+  AX210 は無線を一度下ろすと国を忘れて6GHzが disabled になるので、管理モードの IF を上げたまま wwmon0 を足して上げ、そのあとで IF を下げる（本体と同じ）。
+  どの段階で6GHzが使えなくなるかは `tools/sixghz_check.sh wlan0` で調べられる。
 - 不合格なら：スキャンだけのモードで動かす（`./start.sh pit --scan-only`）。画面の上に「見ていない：活動量・リトライ率・deauth・160MHz受信（スキャンだけのモード）」と出る。
 - あわせて記録：160MHz（`set freq 5955 160 6025`）に合わせられたか。
 

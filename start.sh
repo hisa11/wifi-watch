@@ -134,10 +134,11 @@ if [[ "$MODE" == "monitor" ]]; then
   exec "$ROOT/tools/devpc_monitor.sh" "$IF"
 fi
 if [[ "$MODE" == "pit" && $SCAN_ONLY -eq 0 ]]; then
-  # 本番：AX210 そのものをモニタにする（合否ゲートと同じ）。止めると管理モードに戻して NetworkManager に返す
+  # 本番：AX210 は無線を一度下ろすと国を忘れて6GHzが無効になる（2026-10-21 tools/sixghz_check.sh で確かめた）ので、
+  # 管理モードのIFを上げたままモニタ用IF（wwmon0）を足して受ける。止めると管理モードに戻して NetworkManager に返す
   mkdir -p "$ROOT/data"
   open_browser
-  exec "$ROOT/tools/devpc_monitor.sh" "$IF" --config "$CFG_PIT" --no-vif --log "$ROOT/data/radiod.log"
+  exec "$ROOT/tools/devpc_monitor.sh" "$IF" --config "$CFG_PIT" --keep-regdom --log "$ROOT/data/radiod.log"
 fi
 
 # ------------------------------------------------------------ スキャンだけのモード（Wi-Fiはつながったまま）

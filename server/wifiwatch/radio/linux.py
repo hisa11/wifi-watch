@@ -121,7 +121,7 @@ def parse_phy_freqs(out: str) -> dict[int, bool]:
 class LinuxRadio(Radio):
     def __init__(self, ifname: str, clock: Clock | None = None, runner: Runner = subprocess_runner,
                  monitor_flags: Sequence[str] = (), socket_factory: Callable[[], socket.socket] | None = None,
-                 sys_class_net: str = "/sys/class/net", monitor_vif: str | None = None):
+                 sys_class_net: str = "/sys/class/net", monitor_vif: str | None = None, keep_regdom: bool = False):
         self.ifname = validate_ifname(ifname)
         # 別のモニタ用IF（例：wwmon0）で受けるか。None なら ifname そのものをモニタにする（AX210の既定）。
         # rtw89（開発PCのRTL8852BE）は、つないでいたIFをそのままモニタにすると前の接続のchから動かない
@@ -130,6 +130,13 @@ class LinuxRadio(Radio):
         self.monitor_vif = validate_ifname(monitor_vif) if monitor_vif else None
         if self.monitor_vif == self.ifname:
             raise RadioError("monitor_vif は ifname と別の名前にしてください")
+        # 国の設定を保ったままモニタにする（AX210）。iwlwifi は無線を一度下ろすと国を忘れ（00）、6GHzが全部 disabled になる
+        # （2026-10-21 本番PCで確かめた：管理モードでは JP・6GHz 24ch 使える → モニタにすると 00・0ch）。モニタでは
+        # スキャンしないので覚え直せない。管理モードのIFを上げたまま別のモニタ用IFを足して上げ、そのあとで管理モードの
+        # IFを下げる（無線が止まらないので、国 JP が残る）。どこにもつながず、パッシブスキャンだけ（受信専用のまま）
+        self.keep_regdom = bool(keep_regdom)
+        if self.keep_regdom and not self.monitor_vif:
+            raise RadioError("keep_regdom には monitor_vif（別のモニタ用IF）が要ります")
         self.clock = clock or RealClock()
         self.run = runner
         bad = [f for f in monitor_flags if f not in MONITOR_FLAGS]
@@ -323,6 +330,21 @@ class LinuxRadio(Radio):
 
     def set_monitor(self) -> None:
         self._close_sock()
+        if self.monitor_vif and self.keep_regdom:
+            phy = self.phy()
+            if not phy or not re.match(r"^phy\d+$", phy):
+                raise RadioError(f"{self.ifname} の無線（phy）が分かりません")
+            self._drop_vif()
+            self._link(True)  # 管理モードのIFを上げたまま（無線を止めない）
+            self._cmd(["iw", "phy", phy, "interface", "add", self.monitor_vif, "type", "monitor"])
+            if self.monitor_flags:
+                self._cmd(["iw", "dev", self.monitor_vif, "set", "monitor", *self.monitor_flags], check=False)
+            self._link(True, self.monitor_vif)
+            # モニタ用IFが上がってから管理モードのIFを下げる（モニタのchを変えられるのは、動いているIFがモニタだけのとき）
+            self._link(False)
+            self.tuning = None
+            self._reopen()
+            return
         if self.monitor_vif:
             # つないでいたIFは下げて（管理モードのまま）、同じ無線に別のモニタ用IFを作り直して受ける
             phy = self.phy()
@@ -346,6 +368,9 @@ class LinuxRadio(Radio):
         self._reopen()
 
     def reset_monitor(self) -> None:
+        if self.keep_regdom:
+            # 国を覚え直してからモニタ用IFを作り直す（作り直しの間に無線が止まると、国を忘れるため）
+            self.managed_scan()
         self.set_monitor()
 
     def driver(self) -> str | None:

@@ -101,6 +101,7 @@ if ask "sudo deploy/gate.sh $IF を実行しますか？（その間、この無
     echo "不合格：起動は ./start.sh pit --scan-only（スキャンだけのモード）"
   fi
   echo "無線を元に戻します"
+  [[ -d /sys/class/net/wwmon0 ]] && sudo iw dev wwmon0 del
   sudo ip link set "$IF" down; sudo iw dev "$IF" set type managed; sudo ip link set "$IF" up
   sudo nmcli device set "$IF" managed yes || true
 fi

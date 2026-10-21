@@ -402,3 +402,30 @@ def test_disabled_channels_are_not_tuned_and_recover_when_enabled(sysnet):
     r._hw_at = -1e9  # 60秒たったことにする
     r.tune(validate_tuning(F("6g37"), 20, F("6g37")))
     assert r.disabled_freqs == [] and not r.unreceivable_tuned
+
+
+def test_keep_regdom_brings_monitor_vif_up_before_taking_managed_down(sysnet):
+    # AX210：無線を一度下ろすと国を忘れて6GHzが disabled になる（本番PCで確かめた）。管理モードのIFを上げたまま
+    # モニタ用IFを足して上げ、そのあとで管理モードのIFを下げる（無線を止めない）
+    run = FakeRunner()
+    a, _ = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+    r = LinuxRadio("wlan0", RealClock(), runner=run, socket_factory=lambda: a, sys_class_net=str(sysnet),
+                   monitor_vif="wwmon0", keep_regdom=True)
+    r.managed_scan()
+    run.calls.clear()
+    r.set_monitor()
+    seq = [" ".join(c) for c in run.calls]
+    add = seq.index("iw phy phy0 interface add wwmon0 type monitor")
+    up_vif = seq.index("ip link set wwmon0 up")
+    down_if = seq.index("ip link set wlan0 down")
+    assert add < up_vif < down_if  # モニタ用IFが上がってから、管理モードのIFを下げる
+    assert "ip link set wlan0 up" in seq[:add]  # その前は管理モードのIFを上げたまま
+    assert not any("set type monitor" in c for c in seq)  # 管理モードのIFそのものはモニタにしない
+    assert r.capture_if == "wwmon0"
+    # 復旧のモニタの再設定は、先に管理モードでスキャンして国を覚え直してから
+    run.calls.clear()
+    r.reset_monitor()
+    seq = [" ".join(c) for c in run.calls]
+    assert seq.index("iw dev wlan0 scan passive") < seq.index("iw phy phy0 interface add wwmon0 type monitor")
+    with pytest.raises(RadioError):
+        LinuxRadio("wlan0", RealClock(), runner=run, keep_regdom=True)  # 別のモニタ用IFが要る

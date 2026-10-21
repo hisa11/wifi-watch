@@ -215,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-setup", action="store_true", help="起動時にモニタモードへ切り替えない")
     ap.add_argument("--monitor-vif", default=None,
                     help="別のモニタ用IF（例：wwmon0）を作って受ける。IFそのものをモニタにするとchが変わらない無線（rtw89）向け")
+    ap.add_argument("--keep-regdom", action="store_true",
+                    help="国の設定を保ったままモニタにする（AX210）：管理モードのIFを上げたまま --monitor-vif を足して上げ、そのあと下げる")
     ap.add_argument("--scan-only", action="store_true",
                     help="合否ゲートが不合格のとき：管理モードのパッシブスキャンで動く（ビーコンから分かる機能だけ）")
     args = ap.parse_args(argv)
@@ -225,7 +227,10 @@ def main(argv: list[str] | None = None) -> int:
         radio: LinuxRadio = ScanOnlyRadio(args.interface)
         log.warning("スキャンだけのモードで動きます（活動量・リトライ率・deauth・160MHz受信は使えません）")
     else:
-        radio = LinuxRadio(args.interface, monitor_flags=args.monitor_flag, monitor_vif=args.monitor_vif)
+        if args.keep_regdom and not args.monitor_vif:
+            args.monitor_vif = "wwmon0"
+        radio = LinuxRadio(args.interface, monitor_flags=args.monitor_flag, monitor_vif=args.monitor_vif,
+                           keep_regdom=args.keep_regdom)
     try:
         radio.load_hw_freqs()
         report_unreceivable(radio)

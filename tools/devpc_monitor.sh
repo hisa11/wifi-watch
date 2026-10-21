@@ -3,18 +3,22 @@
 # （その間だけ NetworkManager から外す。PCに残る設定は書かない）。Ctrl-C で止めると、管理モードに戻して NetworkManager に返す。
 # 受信専用（送信・注入はしない）。6GHzに対応していない無線では、6GHzは「見ていない（この無線では受けられない）」と出る。
 #   tools/devpc_monitor.sh [IF名]                          # 開発PC（既定 wlo1、設定は data/devpc/config.json）
-#   tools/devpc_monitor.sh wlp2s0 --config config.json --no-vif --log data/radiod.log   # 本番のミニPC（start.sh pit から）
+#   tools/devpc_monitor.sh wlp2s0 --config config.json --keep-regdom --log data/radiod.log   # 本番のミニPC（start.sh pit から）
+#     --keep-regdom：AX210 は無線を一度下ろすと国を忘れて6GHzが無効になるので、管理モードのIFを上げたまま
+#                    モニタ用IF（wwmon0）を足して上げ、そのあと管理モードのIFを下げる
 # 画面は http://127.0.0.1:8080
 set -u
 IF="wlo1"
 CFG_ARG=""
 LOG_ARG=""
 USE_VIF=1
+KEEP=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config) CFG_ARG="${2:-}"; shift ;;
     --log) LOG_ARG="${2:-}"; shift ;;
-    --no-vif) USE_VIF=0 ;;  # AX210（iwlwifi）は無線そのものをモニタにする（合否ゲートと同じ）
+    --no-vif) USE_VIF=0 ;;  # 無線そのものをモニタにする（合否ゲートと同じ。AX210 では国を忘れて6GHzが無効になる）
+    --keep-regdom) KEEP=1 ;;
     -*) echo "知らない引数です：$1"; exit 2 ;;
     *) IF="$1" ;;
   esac
@@ -32,6 +36,7 @@ SOCK="${WIFIWATCH_RADIOD_SOCK:-/run/wifiwatch/radiod.sock}"
 MON=wwmon0
 VIF_ARGS=(--monitor-vif "$MON")
 [[ $USE_VIF -eq 1 ]] || VIF_ARGS=()
+[[ $KEEP -eq 1 ]] && VIF_ARGS=(--monitor-vif "$MON" --keep-regdom)
 
 if [[ ! -f "$CFG" ]]; then
   # config.example.json をもとに、この無線と radiod を使う設定を作る（gitの外）

@@ -39,24 +39,30 @@ done
 echo "使える ${ok}/24（disabled ${dis}・無い ${miss}）"
 [[ $ok -eq 24 ]] || fail=1
 
-step "モニタモードにする"
-run ip link set "$IF" down && run iw dev "$IF" set type monitor && run ip link set "$IF" up || fail=1
+# AX210 は無線を一度下ろすと国を忘れて（00）6GHzが全部 disabled になる（2026-10-21 本番PCで確かめた）。
+# 本体（./start.sh pit）と同じく、$IF を上げたまま別のモニタ用IFを足して上げ、そのあとで $IF を下げる
+MON=wwmon0
+step "モニタモードにする（$IF を上げたまま $MON を足して上げ、そのあと $IF を下げる。国を保つ）"
+[[ -d /sys/class/net/$MON ]] && run iw dev "$MON" del
+run iw phy "$PHY" interface add "$MON" type monitor && run ip link set "$MON" up && run ip link set "$IF" down || fail=1
+run iw reg get | sed -n '/phy#/,/^$/p' | head -3
 
 step "6GHz ch1（5955MHz）に合わせる（仕様書の最後のコマンド）"
-run iw dev "$IF" set freq 5955 || fail=1
+run iw dev "$MON" set freq 5955 || fail=1
 
 step "参考：160MHz（ch1〜29、中心6025MHz）に合わせられるか"
-if run iw dev "$IF" set freq 5955 160 6025 || run iw dev "$IF" set freq 5955 160MHz; then
+if run iw dev "$MON" set freq 5955 160 6025 || run iw dev "$MON" set freq 5955 160MHz; then
   echo "160MHz: 可"
 else
   echo "160MHz: 不可（LIVEの自ブロックの160MHz受信が使えない）"
 fi
-run iw dev "$IF" set freq 5955 || true
+run iw dev "$MON" set freq 5955 || true
+[[ -d /sys/class/net/$MON ]] && { ip link set "$MON" down; iw dev "$MON" del; }
 
 echo
 if [[ $fail -eq 0 ]]; then
-  echo "合格：6GHzでモニタモードにできます。config.json の radio.kind を \"radiod\" にして使います。"
-  echo "（このIFはモニタモードのまま。管理モードに戻すには： sudo ip link set $IF down && sudo iw dev $IF set type managed && sudo ip link set $IF up）"
+  echo "合格：6GHzでモニタモードにできます。config.json の radio.kind を \"radiod\" にして、./start.sh pit で使います。"
+  echo "（$IF は下がったまま。戻すには： sudo ip link set $IF up && sudo nmcli device set $IF managed yes）"
   exit 0
 else
   echo "不合格：管理モードのパッシブスキャンに切り替えます（radiod を --scan-only で起動）。"
