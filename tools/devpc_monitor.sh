@@ -36,6 +36,9 @@ SOCK="${WIFIWATCH_RADIOD_SOCK:-/run/wifiwatch/radiod.sock}"
 MON=wwmon0
 VIF_ARGS=(--monitor-vif "$MON")
 [[ $USE_VIF -eq 1 ]] || VIF_ARGS=()
+# AX210 など iwlwifi は、無線を一度下ろすと国を忘れて6GHzが無効になるので、指定が無くても国を保つ順番にする
+DRV=$(basename "$(readlink -f "/sys/class/net/$IF/device/driver" 2>/dev/null)" 2>/dev/null)
+[[ "$DRV" == iwlwifi && $USE_VIF -eq 1 ]] && KEEP=1
 [[ $KEEP -eq 1 ]] && VIF_ARGS=(--monitor-vif "$MON" --keep-regdom)
 
 if [[ ! -f "$CFG" ]]; then

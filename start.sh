@@ -38,6 +38,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ------------------------------------------------------------ 前提
+if [[ $EUID -eq 0 ]]; then
+  echo "sudo を付けずに実行してください（例：./start.sh pit）。要るところ（無線の補助 radiod）だけ sudo のパスワードを聞きます。"
+  echo "（sudo を付けると本体も root で動き、data/ のファイルが root のものになって、次から普通に起動できなくなります）"
+  exit 2
+fi
+# 前に sudo ./start.sh で動かして、data/ に root のファイルができていたら、持ち主を戻す方法を出す
+if [[ -d "$ROOT/data" ]] && find "$ROOT/data" ! -user "$(id -u)" -print -quit 2>/dev/null | grep -q .; then
+  echo "data/ に root のファイルがあります（前に sudo を付けて起動したため）。次で持ち主を戻してから、もう一度実行してください："
+  echo "  sudo chown -R $(id -un): $ROOT/data"
+  exit 2
+fi
 if [[ ! -x "$PY" ]]; then
   echo "Pythonの環境がありません。最初に一度だけ："
   echo "  cd $ROOT/server && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
@@ -49,6 +60,12 @@ if ss -ltn 2>/dev/null | grep -q '127.0.0.1:8080 '; then
   exit 1
 fi
 
+if [[ -z "$MODE" ]] && [[ -f "$ROOT/config.json" ]] && "$PY" -c "import json,sys; sys.exit(0 if (json.load(open(sys.argv[1])).get('radio') or {}).get('kind') == 'radiod' else 1)" "$ROOT/config.json" 2>/dev/null; then
+  # 本番のミニPC（config.json が本物の無線）：番号の選び方は開発PC用なので、本番の起動を先に案内する
+  echo "このPCは本番の設定（config.json が radio.kind=radiod）です。本番として起動するなら： ./start.sh pit"
+  read -r -p "本番として起動しますか？ [Y/n] " ans
+  [[ "$ans" == "n" || "$ans" == "N" ]] || MODE=pit
+fi
 if [[ -z "$MODE" ]]; then
   echo "どれで動かしますか？"
   echo "  1) 本物の2.4/5GHz・スキャンだけ（Wi-Fiはつながったまま。sudoが要る）"
