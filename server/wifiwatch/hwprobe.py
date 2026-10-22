@@ -22,6 +22,7 @@ import sys
 import struct
 import time
 from collections import Counter
+from dataclasses import dataclass
 from typing import Any
 
 from . import channels as ch
@@ -87,14 +88,32 @@ def cmd_frames(r: LinuxRadio, a: argparse.Namespace) -> int:
 _ST_BEACON, _ST_PROBE_RESP = 8, 5
 
 
-def _passes(spec: str) -> list[tuple[float, int]]:
-    """「1chに居る秒数x周回数」をカンマで並べたもの（例 2x1,0.25x6）。"""
+@dataclass
+class _Pass:
+    dwell: float
+    rounds: int
+    pre: Any = None  # 2.4GHz のchの前に合わせておく所（本体の巡回では 5GHz・6GHz から 2.4GHz に飛ぶ）
+    name: str = ""
+
+
+def _passes(spec: str) -> list[_Pass]:
+    """「1chに居る秒数x周回数」をカンマで並べたもの（例 1x1,0.25x4,0.25x4@5g144,0.25x4@6g37/160）。
+    @ のあとは、各chの前に同じ秒数だけ合わせておく所（ch か ch/幅）。"""
     out = []
     for x in (y.strip() for y in spec.split(",") if y.strip()):
-        m = re.fullmatch(r"(\d+(?:\.\d+)?)x(\d+)", x)
+        m = re.fullmatch(r"(\d+(?:\.\d+)?)x(\d+)(?:@([256]g\d{1,3})(?:/(\d{2,3}))?)?", x)
         if not m or not 0.05 <= float(m[1]) <= 10 or not 1 <= int(m[2]) <= 50:
-            raise SystemExit(f"--passes が不正です: {x}（例 2x1,0.25x6）")
-        out.append((float(m[1]), int(m[2])))
+            raise SystemExit(f"--passes が不正です: {x}（例 1x1,0.25x4,0.25x4@5g144）")
+        pre = tuning_for(m[3], int(m[4] or 20)) if m[3] else None
+        if pre is None:
+            name = "長" if float(m[1]) >= 0.5 else "短"
+        else:
+            name = {ch.BAND_5: "5G後", ch.BAND_6: "6G後"}.get(ch.band_of_freq(pre.freq), "切替後")
+        out.append(_Pass(float(m[1]), int(m[2]), pre, name))
+    seen = Counter(p.name for p in out)
+    for k, p in enumerate(out):
+        if seen[p.name] > 1:
+            p.name = f"{p.name}{k + 1}"
     return out
 
 
@@ -127,10 +146,12 @@ def cmd_rtdump(r: LinuxRadio, a: argparse.Namespace) -> int:
     """APの強さの読み取りを確かめる。chごとに受けたビーコン・プローブ応答を、APごとにまとめて出す。
 
     - 本体と同じフレーム（保護なしのビーコン・プローブ応答、radiotap のchが合わせたchと同じ、FCSが正しい）を数える。
-    - 「長」「短」…：--passes の1つずつ（1chに居る秒数x周回数）。APの主chで受けたフレームの読み取りの中央（最小〜最大）とフレーム数。
+    - --passes の1つずつ（1chに居る秒数x周回数、@ があれば各chの前にそこへ合わせる）について、APの主chで受けた
+      フレームの読み取りの「中央/最大」。本体の巡回（PRE）では 2.4GHz ch1 の前は 5GHz ch144。
     - 「本体」：本体と同じ計算（隣のchで受けたものも含めて、受けた順に 0.8・0.2 の移動平均）にした値。画面の強さはこれ。
     - --ref があれば、管理モードのスキャンの強さ（手本）を並べる。
-    - 外れた値（-25dBm以上、または中央より12dB以上強い）のフレームだけ、radiotap の頭（受信の情報。通信の中身ではない）を出す。
+    - 外れた値（-25dBm以上、または中央より12dB以上強い）のフレームは、回ごとに数と、chを合わせてから何msだったかを出し、
+      APごとに一番強いものの radiotap の頭（受信の情報。通信の中身ではない）を出す。
     データフレームは見ない。ビーコンからは主chとSSIDだけを読む。
     """
     chs = [tuning_for(x.strip(), 20) for x in a.chs.split(",") if x.strip()]
@@ -139,35 +160,58 @@ def cmd_rtdump(r: LinuxRadio, a: argparse.Namespace) -> int:
     freqs = {t.freq for t in chs}
     aps: dict[str, dict[str, Any]] = {}
     cnt = Counter()
-    for pi, (dwell, rounds) in enumerate(passes):
-        for _ in range(rounds):
-            for t in chs:
-                r.tune(t)
-                end = time.monotonic() + dwell
-                while (left := end - time.monotonic()) > 0:
-                    b = r.capture(min(0.5, max(0.05, left)))
-                    for fr in b.frames:
-                        _rt_note(bytes(fr), t.freq, pi, len(passes), aps, cnt)
-    names = ["長", "短"] if len(passes) == 2 and passes[0][0] > passes[1][0] else [f"P{i + 1}" for i in range(len(passes))]
-    print(f"[rtdump] {len(chs)}ch。" + "・".join(f"{n}＝1chに{d:g}秒×{k}周" for n, (d, k) in zip(names, passes))
-          + "。値は dBm、中央(最小〜最大)n=フレーム数")
-    print(f"  受けた管理フレーム {cnt['mgmt']}・強さなし {cnt['nosig']}・ドライバの値が0以上 {cnt['drv_pos']}・"
-          f"radiotapの読み違い {cnt['rt_err']}・ch違い {cnt['wrong_freq']}")
+    per = [Counter() for _ in passes]
+    odd_ms: list[list[int]] = [[] for _ in passes]
+    failed: dict[int, str] = {}
+    for pi, ps in enumerate(passes):
+        try:
+            for _ in range(ps.rounds):
+                for t in chs:
+                    if ps.pre is not None:
+                        r.tune(ps.pre)
+                        _drain(r, ps.dwell)  # そこで受けたものは数えない
+                    r.tune(t)
+                    t0 = time.monotonic()
+                    end = t0 + ps.dwell
+                    while (left := end - time.monotonic()) > 0:
+                        b = r.capture(min(0.05, max(0.02, left)))
+                        ms = round((time.monotonic() - t0) * 1000)
+                        for fr in b.frames:
+                            if _rt_note(bytes(fr), t.freq, pi, len(passes), aps, cnt, per[pi], ms):
+                                odd_ms[pi].append(ms)
+        except RadioError as e:
+            failed[pi] = str(e)[:60]  # 合わせられないch（無線で無効など）。ほかの回は続ける
+    names = [p.name for p in passes]
+    desc = []
+    for p in passes:
+        x = f"{p.name}＝1chに{p.dwell:g}秒×{p.rounds}周"
+        if p.pre is not None:
+            x += f"（各chの前に{ch.label(p.pre.freq)}・{p.pre.width}MHzに{p.dwell:g}秒）"
+        desc.append(x)
+    print(f"[rtdump] {len(chs)}ch。" + "・".join(desc))
+    print("  値は dBm の「中央/最大」。BSSIDは後ろ3つ")
+    for pi, (p, c, ms) in enumerate(zip(passes, per, odd_ms)):
+        if pi in failed:
+            print(f"  {p.name}：途中で合わせられなくなった（{failed[pi]}）")
+        x = f"  {p.name}：管理フレーム {c['mgmt']}・外れ {c['odd']}"
+        if ms:
+            x += f"（合わせてから {min(ms)}〜{max(ms)}ms）"
+        x += f"・強さなし {c['nosig']}・ドライバの値が0以上 {c['drv_pos']}"
+        print(x)
+    print(f"  radiotapの読み違い {cnt['rt_err']}・ch違い {cnt['wrong_freq']}")
 
     def fmt(v: list[int]) -> str:
-        if not v:
-            return "     —        "
-        return f"{round(statistics.median(v)):>4}({min(v)}〜{max(v)})n{len(v)}"
+        return f"{round(statistics.median(v))}/{max(v)}" if v else "—"
 
     rows = sorted(aps.items(), key=lambda kv: (kv[1]["freq"] > 3000, kv[1]["freq"],
                                                -(ref.get(kv[0], (0, None))[1] or -200)))
     for bssid, d in rows:
         rf = ref.get(bssid)
-        line = f"  {ch.label(d['freq']).replace('2.4GHz ch', '2g').replace('GHz ch', 'g'):<5} {bssid} {(d['ssid'] or '(非公開)')[:14]:<14}"
-        line += f" 手本{rf[1]:>4.0f}" if rf and rf[1] is not None else " 手本   —"
+        line = f"  {ch.label(d['freq']).replace('2.4GHz ch', '2g').replace('GHz ch', 'g'):<5}{bssid[9:]} {(d['ssid'] or '(非公開)')[:12]:<12}"
+        line += f" 手本{rf[1]:.0f}" if rf and rf[1] is not None else " 手本—  "
         for n, v in zip(names, d["p"]):
-            line += f" | {n}{fmt(v)}"
-        line += f" | 本体{round(d['ema']):>4}" if d["ema"] is not None else " | 本体  —"
+            line += f" {n}{fmt(v):<8}"
+        line += f" 本体{round(d['ema'])}" if d["ema"] is not None else " 本体—"
         print(line)
     only = sorted(((b, f, s) for b, (f, s) in ref.items() if b not in aps and f in freqs and s is not None), key=lambda x: -x[2])
     if only:
@@ -175,30 +219,38 @@ def cmd_rtdump(r: LinuxRadio, a: argparse.Namespace) -> int:
     odd = [(b, d["odd"]) for b, d in rows if d["odd"]]
     if odd:
         print("  外れた値のフレーム（APごとに一番強いもの）：")
-    for bssid, (sig, drv, chains, pi, tf, sub, words, hx) in odd[:8]:
-        print(f"  {bssid} {names[pi]} 受けたch={ch.label(tf)} {'ビーコン' if sub == _ST_BEACON else 'プローブ応答'} "
+    for bssid, (sig, drv, chains, pi, tf, sub, ms, words, hx) in odd[:8]:
+        print(f"  {bssid[9:]} {names[pi]} {ch.label(tf)} {ms}ms {'ビーコン' if sub == _ST_BEACON else 'プローブ応答'} "
               f"読み取り={sig} ドライバ={drv} アンテナごと={chains} present={','.join(words)}")
         print(f"    頭={hx}")
     return 0
 
 
-def _rt_note(fr: bytes, tuned: int, pi: int, npass: int, aps: dict[str, dict[str, Any]], cnt: Counter) -> None:
+def _drain(r: LinuxRadio, seconds: float) -> None:
+    end = time.monotonic() + seconds
+    while (left := end - time.monotonic()) > 0:
+        r.capture(min(0.1, max(0.02, left)))
+
+
+def _rt_note(fr: bytes, tuned: int, pi: int, npass: int, aps: dict[str, dict[str, Any]], cnt: Counter,
+             pc: Counter, ms: int) -> bool:
+    """1フレームぶん。外れた値なら True。"""
     try:
         rx = radiotap.parse(fr)
         h = dot11.parse_header(fr, rx.length, len(fr))
     except (radiotap.RadiotapError, dot11.Dot11Error):
         cnt["rt_err"] += 1
-        return
+        return False
     if h.ftype != 0 or h.subtype not in (_ST_BEACON, _ST_PROBE_RESP) or h.addr3 is None or h.flags & dot11.FLAG_PROTECTED:
-        return
+        return False
     if rx.bad_fcs:
-        return
+        return False
     if rx.freq is not None and rx.freq != tuned:
         cnt["wrong_freq"] += 1
-        return
-    cnt["mgmt"] += 1
+        return False
+    pc["mgmt"] += 1
     if rx.driver_signal is not None and rx.driver_signal >= 0:
-        cnt["drv_pos"] += 1
+        pc["drv_pos"] += 1
     bssid = h.addr3.hex(":")
     d = aps.get(bssid)
     if d is None:
@@ -206,22 +258,25 @@ def _rt_note(fr: bytes, tuned: int, pi: int, npass: int, aps: dict[str, dict[str
         body = rx.length + h.hdr_len + 12
         info = ies.parse_bss(fr, body, end) if body <= end else None
         if info is None:
-            return  # 本体も、中身を読めるまでは局にしない
+            return False  # 本体も、中身を読めるまでは局にしない
         d = aps[bssid] = {"freq": _beacon_freq(info) or tuned, "ssid": info.ssid, "p": [[] for _ in range(npass)],
                           "ema": None, "odd": None}
     sig = rx.signal
     if sig is None:
-        cnt["nosig"] += 1
-        return
+        pc["nosig"] += 1
+        return False
     d["ema"] = sig if d["ema"] is None else d["ema"] * 0.8 + sig * 0.2  # 本体（analyzer/stations.py）と同じ
     if tuned == d["freq"]:
         d["p"][pi].append(sig)
-    ref_v = [v for p in d["p"] for v in p]
-    med = statistics.median(ref_v) if len(ref_v) >= 3 else None
-    if sig >= -25 or (med is not None and sig >= med + 12):
-        if d["odd"] is None or sig > d["odd"][0]:
-            d["odd"] = (sig, rx.driver_signal, [s for _, s in rx.chains], pi, tuned, h.subtype,
-                        _rt_words(fr, rx.length), fr[:min(rx.length, 64)].hex())
+    base = d["p"][0] if len(d["p"][0]) >= 3 else [v for p in d["p"] for v in p]
+    med = statistics.median(base) if len(base) >= 3 else None
+    if not (sig >= -25 or (med is not None and sig >= med + 12)):
+        return False
+    pc["odd"] += 1
+    if d["odd"] is None or sig > d["odd"][0]:
+        d["odd"] = (sig, rx.driver_signal, [s for _, s in rx.chains], pi, tuned, h.subtype, ms,
+                    _rt_words(fr, rx.length), fr[:min(rx.length, 64)].hex())
+    return True
 
 
 def _beacon_freq(info: ies.BssInfo) -> int | None:
@@ -471,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--relink", action="store_true", help="chごとにIFを下げて上げてから合わせる")
     p = sub.add_parser("rtdump")
     p.add_argument("--chs", default=",".join(f"2g{n}" for n in range(1, 14)))
-    p.add_argument("--passes", default="2x1,0.25x6")
+    p.add_argument("--passes", default="1x1,0.25x4,0.25x4@5g144,0.25x4@6g37/160")
     p.add_argument("--ref", default=None)
     p = sub.add_parser("own-rssi")
     p.add_argument("--bssid", required=True)

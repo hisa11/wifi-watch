@@ -450,31 +450,54 @@ def test_link_up_is_retried_after_io_error(sysnet):
 
 
 def test_rtdump_summarizes_each_ap(sysnet, capsys, tmp_path):
-    # 本番PCで 2.4GHz の強さが -2〜-12dBm と出た件を調べる道具：APごとに、スキャンの手本・長く居たとき・短く切り替えたとき・
-    # 本体の計算を並べ、外れた値のフレームだけ radiotap の頭を出す
+    # 本番PCで 2.4GHz の強さが -2〜-12dBm と出た件を調べる道具：APごとに、スキャンの手本・回ごと（長く居る・短く切り替える・
+    # 5GHz/6GHz から飛んだ直後）の中央/最大・本体の計算を並べ、外れた値のフレームは数と合わせてからの時間と radiotap の頭を出す
     import argparse
     from wifiwatch import hwprobe
     run = FakeRunner()
     r, feed = make_linux(run, sysnet)
     r.set_monitor()
-    good = build.radiotap(F("2g1"), signal=-61, chains=[-63, -65]) + build.beacon("02:00:00:00:00:01", build.ap_ies(F("2g1"), 20, "AP1", standard="n"))
-    odd = build.radiotap(F("2g1"), signal=-3, chains=[-3, -60]) + build.beacon("02:00:00:00:00:01", build.ap_ies(F("2g1"), 20, "AP1", standard="n"))
+    ies1 = build.ap_ies(F("2g1"), 20, "AP1", standard="n")
+    good = build.radiotap(F("2g1"), signal=-61, chains=[-63, -65]) + build.beacon("02:00:00:00:00:01", ies1)
+    odd = build.radiotap(F("2g1"), signal=-3, chains=[-3, -60]) + build.beacon("02:00:00:00:00:01", ies1)
     leak = build.radiotap(F("2g2"), signal=-70) + build.beacon("02:00:00:00:00:02", build.ap_ies(F("2g1"), 20, "AP2", standard="n"))
+    other = build.radiotap(F("5g144"), signal=-50) + build.beacon("02:00:00:00:00:05", build.ap_ies(F("5g144"), 20, "AP5"))
+    last = {"f": None}
 
-    def tune(t):  # 合わせたことにして、そのchで受けたフレームを流し込む
+    def tune(t):  # 合わせたことにして、そのchで受けたフレームを流し込む。5GHz から ch1 に来た直後だけ外れた値
+        prev, last["f"] = last["f"], t.freq
         r.tuning = t
-        for fr in ([good] * 4 + [odd] if t.freq == F("2g1") else [leak]):
+        if t.freq == F("2g1"):
+            frames = [odd] + [good] * 4 if prev == F("5g144") else [good] * 4
+        elif t.freq == F("2g2"):
+            frames = [leak]
+        else:
+            frames = [other]
+        for fr in frames:
             feed.send(fr)
     r.tune = tune
     ref = tmp_path / "ref.txt"
     ref.write_text("02:00:00:00:00:01 2412 -60.00\n02:00:00:00:00:09 2412 -70.00\n")
-    hwprobe.cmd_rtdump(r, argparse.Namespace(chs="2g1,2g2", passes="0.2x1,0.1x1", ref=str(ref)))
+    hwprobe.cmd_rtdump(r, argparse.Namespace(chs="2g1,2g2", passes="0.5x1,0.1x1,0.1x1@5g144", ref=str(ref)))
     out = capsys.readouterr().out
-    line = next(x for x in out.splitlines() if "02:00:00:00:00:01" in x and "手本" in x)
-    assert "AP1" in line and "手本 -60" in line and "長 -61(-61〜-3)n5" in line and line.startswith("  2g1 ")
-    assert "本体" in line
+    assert "5G後＝1chに0.1秒×1周（各chの前に5GHz ch144・20MHzに0.1秒）" in out
+    line = next(x for x in out.splitlines() if "00:00:01" in x and "手本" in x)
+    assert line.startswith("  2g1  00:00:01 AP1") and "手本-60" in line
+    assert "短-61/-61" in line and "5G後-61/-3" in line and "本体" in line
+    assert "  5G後：管理フレーム 6・外れ 1（合わせてから" in out and "  短：管理フレーム 5・外れ 0・" in out
+    assert "5GHz ch144" not in line and "00:00:05" not in out  # 前に合わせた所で受けたものは数えない
     assert "スキャンだけで見えた（モニタで受けなかった）1局" in out
-    assert "読み取り=-3 ドライバ=-3 アンテナごと=[-3, -60]" in out and "頭=" in out
+    assert "00:00:01 5G後 2.4GHz ch1" in out and "読み取り=-3 ドライバ=-3 アンテナごと=[-3, -60]" in out and "頭=" in out
     # 主chでないchで受けたもの（隣のchへの漏れ）は、主chの欄には入れず、本体の計算には入れる
-    line2 = next(x for x in out.splitlines() if "02:00:00:00:00:02" in x)
-    assert "長     —" in line2 and "本体 -70" in line2
+    line2 = next(x for x in out.splitlines() if "00:00:02" in x)
+    assert "長—" in line2 and "本体-70" in line2
+
+
+def test_rtdump_passes_spec():
+    from wifiwatch import hwprobe
+    ps = hwprobe._passes("1x1,0.25x4,0.25x4@5g144,0.25x4@6g37/160")
+    assert [p.name for p in ps] == ["長", "短", "5G後", "6G後"]
+    assert ps[3].pre.width == 160 and ps[3].pre.freq == F("6g37") and ps[2].pre.width == 20
+    for bad in ("0.25x4@6g37/7", "9x0", "0.25x4@x1", "0.25x4;rm"):
+        with pytest.raises(SystemExit):
+            hwprobe._passes(bad)
