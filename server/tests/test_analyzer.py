@@ -201,3 +201,30 @@ def test_station_is_gone_after_missed_visits_not_just_time():
     visit(g)
     visit(f, [beacon])
     assert missed_visits(st, a) == 0 and is_present(st, a, Sched(), clk.monotonic())
+
+
+def test_rssi_is_median_of_recent_and_odd_frames_are_kept():
+    # 本番PCで 2.4GHz の局が -72dBm なのに -11dBm と出た件：1つだけ外れた値が来ても強さは動かず、外れたフレームは覚える
+    a = Analyzer(FakeClock())
+    f = F("2g1")
+    bss = "02:00:00:00:24:01"
+    ies = build.ap_ies(f, 20, "AP24", standard="n")
+    for _ in range(6):
+        a.process_batch(batch(F("5g144"), 20, []))  # 前に 5GHz を見ていた
+        a.process_batch(batch(f, 20, [bcn(f, bss, ies, sig=-72)]))
+    a.process_batch(batch(F("5g144"), 20, []))
+    odd = rt(f, -11) + build.with_fcs(build.beacon(bss, ies))
+    a.process_batch(batch(f, 20, [bcn(f, bss, ies, sig=-72), odd]))
+    st = a.table.get(bss)
+    assert st.rssi == -11 and st.rssi_max == -11
+    assert st.rssi_avg == -72.0  # 直近の中央値。前の 0.8・0.2 の移動平均なら -60
+    assert a.counters["rssi_odd"] == 1
+    e = a.odd_since()[-1]
+    assert e["bssid"] == bss and e["signal"] == -11 and e["driver"] == -11 and e["chains"] == [-14, -14]
+    assert e["tuned"] == [f, 20] and e["prev_tuning"] == [F("5g144"), 20] and e["median_before"] == -72.0
+    assert e["kind"] == "beacon" and e["head"].startswith("0000") and e["present"]
+    assert e["index"] == 2 and e["batch_frames"] == 2
+    # ドライバの値が 0dBm 以上（ありえない値）は、強さ不明にして数える
+    a.process_batch(batch(f, 20, [build.radiotap(f, signal=3, flags=0x10) + build.with_fcs(build.beacon(bss, ies))]))
+    assert a.counters["driver_bad"] == 1 and a.counters["rssi_odd"] == 2 and a.odd_since()[-1]["signal"] is None
+    assert a.table.get(bss).rssi_avg == -72.0

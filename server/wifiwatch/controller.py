@@ -543,6 +543,20 @@ class Controller:
                 out.setdefault(pid, []).append(a.type)
         return out
 
+    def diag_rssi(self) -> dict[str, Any]:
+        """強さの読み取りの確かめ（本番PCで 2.4GHz の強さが -2〜-12dBm と出た件）。外れた値のフレーム（radiotap の頭まで）と、
+        2.4GHz の局の直近の読み取り。tools/rssi_odd.py で見る。"""
+        an = self.mon.analyzer
+        sts = sorted((x for x in an.table.all() if x.band == ch.BAND_24), key=lambda x: -(x.rssi_avg if x.rssi_avg is not None else -200))
+        return {
+            "now": self.clock.time(),
+            "counters": dict(an.counters),
+            "odd": an.odd_since(),
+            "stations_24": [{"bssid": x.bssid, "ssid": x.ssid, "primary": x.primary_freq, "rssi": x.rssi,
+                             "rssi_avg": x.rssi_avg, "rssi_max": x.rssi_max, "recent": list(x.rssi_recent),
+                             "beacons": x.beacons, "last_seen": x.last_seen} for x in sts[:40]],
+        }
+
     def stations(self, include_gone_s: float = 600.0) -> list[dict[str, Any]]:
         now = self.clock.monotonic()
         s = self.mon.scheduler

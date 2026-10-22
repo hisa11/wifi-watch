@@ -85,6 +85,10 @@ def create_app(ctl: Controller, port: int) -> FastAPI:
     def station(bssid: str) -> Any:
         return ctl.station_detail(bssid.lower())
 
+    @app.get("/api/diag/rssi")
+    def diag_rssi() -> Any:
+        return ctl.diag_rssi()
+
     @app.get("/api/clients")
     def clients() -> Any:
         return ctl.clients()

@@ -4,15 +4,21 @@
 - 受信したchは別に数える（seen_on）。
 - IEの解析は重いので、同じ局は parse_interval 秒に1回だけ全部読み、それ以外は強さと時刻だけ更新する。
 - 端末はデータフレームのMACヘッダだけから作る（ペイロードは読まない）。
+- 局の強さ（rssi_avg）は、直近 RSSI_WINDOW 回の読み取りの中央値。1つだけ外れた値が来ても大きく動かない
+  （前は 0.8・0.2 の移動平均で、本番PCで 2.4GHz の局が -72dBm から -11dBm に引っぱられた）。
 """
 from __future__ import annotations
 
+import statistics
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
 from .. import channels as ch
 from ..capture import ies
+
+RSSI_WINDOW = 9
 
 
 @dataclass
@@ -47,6 +53,7 @@ class Station:
     rssi: int | None = None
     rssi_avg: float | None = None
     rssi_max: int | None = None
+    rssi_recent: deque[int] = field(default_factory=lambda: deque(maxlen=RSSI_WINDOW), repr=False)
     beacons: int = 0
     data_frames: int = 0
     seen_on: dict[int, int] = field(default_factory=dict)
@@ -96,6 +103,7 @@ class Station:
             "rssi": self.rssi,
             "rssi_avg": None if self.rssi_avg is None else round(self.rssi_avg, 1),
             "rssi_max": self.rssi_max,
+            "rssi_recent": list(self.rssi_recent),
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "beacons": self.beacons,
@@ -181,7 +189,8 @@ class StationTable:
             st.seen_on[rx_freq] = st.seen_on.get(rx_freq, 0) + 1
             if rssi is not None:
                 st.rssi = rssi
-                st.rssi_avg = rssi if st.rssi_avg is None else st.rssi_avg * 0.8 + rssi * 0.2
+                st.rssi_recent.append(rssi)
+                st.rssi_avg = float(statistics.median(st.rssi_recent))
                 st.rssi_max = rssi if st.rssi_max is None else max(st.rssi_max, rssi)
         if event != "updated":
             for f in self.on_change:

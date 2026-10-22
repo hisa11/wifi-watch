@@ -4,6 +4,9 @@
 - FCSが壊れたフレームは数えるだけで、中身は使わない。
 - データフレームはMACヘッダだけを見る。管理フレームはビーコン・プローブ応答のIEと、deauth/disassocの宛先と理由だけ。
 - 自分のアドレス（自APのBSSID、自端末のMAC）を含むフレームは、活動量とリトライ率から除く。
+- 局の強さとして外れた値（-30dBm以上・その局の中央値より20dB以上強い・ドライバの値が0dBm以上）を受けたら、
+  直近 ODD_KEEP 件を覚える（radiotap の頭だけ。通信の中身は残さない）。本番PCで 2.4GHz の強さが -2〜-12dBm と
+  出た件を、本体の中で起きたまま捕まえるため（/api/diag/rssi と tools/rssi_odd.py で見る）。
 """
 from __future__ import annotations
 
@@ -23,6 +26,8 @@ from .stats import ChannelStats
 _MGMT_BSS = (dot11.ST_BEACON, dot11.ST_PROBE_RESP)
 _MGMT_KICK = (dot11.ST_DEAUTH, dot11.ST_DISASSOC)
 _u16 = struct.Struct("<H").unpack_from
+_u32 = struct.Struct("<I").unpack_from
+ODD_KEEP = 40
 
 
 @dataclass(slots=True)
@@ -54,7 +59,10 @@ class Analyzer:
         self.deauths: deque[DeauthEvent] = deque(maxlen=20000)
         self.own: set[bytes] = set()
         self.set_own_addrs(own_addrs)
-        self.counters = {"frames": 0, "radiotap_errors": 0, "header_errors": 0, "wrong_freq": 0, "bad_fcs": 0}
+        self.counters = {"frames": 0, "radiotap_errors": 0, "header_errors": 0, "wrong_freq": 0, "bad_fcs": 0,
+                         "rssi_odd": 0, "driver_bad": 0}
+        self.rssi_odd: deque[dict] = deque(maxlen=ODD_KEEP)
+        self._prev_tuning: tuple[int, int] | None = None
         self.lock = threading.Lock()
 
     def set_own_addrs(self, addrs: Iterable[str]) -> None:
@@ -123,7 +131,23 @@ class Analyzer:
                     info = None
                     if table.needs_parse(bssid, mono) and body <= end:
                         info = ies.parse_bss(raw, body, end)
+                    prev = table.stations.get(bssid)
+                    prev_med, prev_n = (prev.rssi_avg, len(prev.rssi_recent)) if prev is not None else (None, 0)
                     st = table.update_beacon(bssid, tun.freq, rx.signal, info, now, mono)
+                    drv = rx.driver_signal
+                    if drv is not None and not -127 < drv < 0:
+                        c["driver_bad"] += 1
+                    sig = rx.signal
+                    if st is not None and ((drv is not None and not -127 < drv < 0) or (sig is not None and (
+                            sig >= -30 or (prev_med is not None and prev_n >= 5 and sig >= prev_med + 20)))):
+                        c["rssi_odd"] += 1
+                        self.rssi_odd.append({
+                            "at": now, "bssid": bssid, "ssid": st.ssid, "primary": st.primary_freq,
+                            "tuned": [tun.freq, tun.width], "prev_tuning": list(self._prev_tuning) if self._prev_tuning else None,
+                            "kind": "beacon" if st_type == dot11.ST_BEACON else "probe_resp",
+                            "signal": sig, "driver": drv, "chains": [v for _, v in rx.chains], "median_before": prev_med,
+                            "index": accepted, "batch_frames": len(batch.frames), "batch_s": round(batch.t_end - batch.t_start, 3),
+                            "present": _present_words(raw, rx.length), "head": bytes(raw[:min(rx.length, 64)]).hex()})
                     if st is not None:
                         st.visits_at_seen = stats.visits.get(st.primary_freq, 0)
                         prev = seen.get(bssid)
@@ -145,7 +169,22 @@ class Analyzer:
                 cl = h.client
                 table.note_data(bss.hex(":") if bss else None, cl.hex(":") if cl else None, rx.signal, now,
                                 bool(cl[0] & 0x02) if cl else False)
+        self._prev_tuning = (tun.freq, tun.width)
         return BatchResult(len(batch.frames), accepted, batch.receive_s, seen)
+
+    def odd_since(self, n: int = ODD_KEEP) -> list[dict]:
+        return list(self.rssi_odd)[-n:]
 
     def deauths_since(self, mono: float) -> list[DeauthEvent]:
         return [d for d in list(self.deauths) if d.mono >= mono]
+
+
+def _present_words(raw, length: int) -> list[str]:
+    out, off = [], 4
+    while off + 4 <= length and len(out) < 8:
+        w = _u32(raw, off)[0]
+        out.append(f"{w:08x}")
+        off += 4
+        if not w & 0x80000000:
+            break
+    return out

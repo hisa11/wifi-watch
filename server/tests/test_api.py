@@ -313,3 +313,24 @@ def test_phone_record_stations_are_analyzed_like_pc_ones(env):
     assert next(x for x in shown["stations"] if x["bssid"] == "02:a0:00:00:00:01")["kind"] == "team"
     assert "kind" not in next(x for x in app.store.get_record(rec["id"])["stations"] if x["bssid"] == "02:a0:00:00:00:01")
     assert client.get("/api/records/nope/stations", params={"bssid": "02:a0:00:00:00:01"}).status_code == 404
+
+
+def test_diag_rssi_lists_odd_frames_and_24ghz_stations(env):
+    # tools/rssi_odd.py が読む：外れた値のフレームと、2.4GHz の局の直近の読み取り
+    app, c, clk = env
+    d = c.get("/api/diag/rssi").json()
+    assert {"now", "counters", "odd", "stations_24"} <= set(d)
+    assert "rssi_odd" in d["counters"] and isinstance(d["odd"], list)
+    assert d["stations_24"] and all(x["primary"] < 3000 for x in d["stations_24"])
+    x = d["stations_24"][0]
+    assert x["recent"] and len(x["recent"]) <= 9 and x["rssi_avg"] is not None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rssi_odd", ROOT / "tools" / "rssi_odd.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    d["odd"] = [{"at": d["now"], "bssid": "02:00:00:00:24:01", "ssid": "AP24", "primary": 2412, "tuned": [2412, 20],
+                 "prev_tuning": [5720, 20], "kind": "beacon", "signal": -11, "driver": -11, "chains": [-14, -14],
+                 "median_before": -69.0, "index": 2, "batch_frames": 2, "batch_s": 0.25, "present": ["a000402a"], "head": "0000"}]
+    lines = mod.render(d)
+    assert lines[0].startswith("== ") and "外れ" in lines[0]
+    assert any("00:24:01 主2g1 受2g1/20 前5g144/20 ビーコン 読み-11" in ln for ln in lines)
