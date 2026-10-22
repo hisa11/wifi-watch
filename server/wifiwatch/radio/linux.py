@@ -346,8 +346,8 @@ class LinuxRadio(Radio):
             phy = self.phy()
             if not phy or not re.match(r"^phy\d+$", phy):
                 raise RadioError(f"{self.ifname} の無線（phy）が分かりません")
+            self._link(True)  # 管理モードのIFを上げたまま（無線を止めない）。古いモニタ用IFは、上げてから消す
             self._drop_vif()
-            self._link(True)  # 管理モードのIFを上げたまま（無線を止めない）
             self._cmd(["iw", "phy", phy, "interface", "add", self.monitor_vif, "type", "monitor"])
             if self.monitor_flags:
                 self._cmd(["iw", "dev", self.monitor_vif, "set", "monitor", *self.monitor_flags], check=False)
@@ -406,13 +406,30 @@ class LinuxRadio(Radio):
             time.sleep(0.1)
         raise RadioError(f"読み込み直しのあと {self.ifname} が戻りません（IF名が変わった可能性）")
 
+    def _if_type(self, dev: str) -> int | None:
+        """IFの種類（/sys/class/net/<if>/type）。1 は管理モード（ARPHRD_ETHER）、803 はモニタ（radiotap）。"""
+        try:
+            return int((self.sys_class_net / dev / "type").read_text().strip())
+        except (OSError, ValueError):
+            return None
+
     def managed_scan(self) -> int:
-        """管理モードで1回スキャン（受信のための操作。周りの国情報で6GHzを有効にさせる）。"""
+        """管理モードで1回スキャン（受信のための操作。周りの国情報で6GHzを有効にさせる）。
+
+        IFがもう管理モードなら、無線を止めずに上げるだけにする。別のモニタ用IFで受けていたら、管理モードのIFを
+        上げてから消す（このあと set_monitor で作り直す）。AX210 は無線が一度止まると、国を忘れて6GHzが無効になり、
+        モニタで読む強さも 2.4GHz で40〜55dB強く狂った（2026-10-22 本番PC。止めずに作った tools/rssi_check.sh では正しい）。
+        モニタになっているIF（前の版・開発PCのやり方）だけは、下げて管理モードに戻す。
+        """
         self._close_sock()
-        self._drop_vif()  # 別のモニタ用IFで受けていたら消してからスキャンする（このあと set_monitor で作り直す）
-        self._link(False)
-        self._cmd(["iw", "dev", self.ifname, "set", "type", "managed"])
-        self._link(True)
+        if self._if_type(self.ifname) == 1:
+            self._link(True)
+            self._drop_vif()
+        else:
+            self._drop_vif()
+            self._link(False)
+            self._cmd(["iw", "dev", self.ifname, "set", "type", "managed"])
+            self._link(True)
         # パッシブだけ（受信専用：プローブ要求を送らない。国情報はビーコンから受ける）
         r = self._cmd(["iw", "dev", self.ifname, "scan", "passive"], 30.0, check=False)
         if r.rc != 0:

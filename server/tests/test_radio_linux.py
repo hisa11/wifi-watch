@@ -501,3 +501,43 @@ def test_rtdump_passes_spec():
     for bad in ("0.25x4@6g37/7", "9x0", "0.25x4@x1", "0.25x4;rm"):
         with pytest.raises(SystemExit):
             hwprobe._passes(bad)
+
+
+def test_keep_regdom_never_stops_the_radio(sysnet):
+    # 本番PC（AX210）：起動時のスキャンで無線を一度止めると、モニタで読む 2.4GHz の強さが 40〜55dB 強く狂った
+    # （-72dBm の局が -18dBm）。止めずに作った tools/rssi_check.sh では正しい。IFがもう管理モードなら、上げるだけでスキャンし、
+    # モニタ用IFは管理モードのIFを上げてから消す。起動（スキャン→モニタ）でも復旧でも、動いているIFが無くなる時がない
+    (sysnet / "wlan0" / "type").write_text("1\n")
+    run = FakeRunner()
+    a, _ = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+    r = LinuxRadio("wlan0", RealClock(), runner=run, socket_factory=lambda: a, sys_class_net=str(sysnet),
+                   monitor_vif="wwmon0", keep_regdom=True)
+
+    def never_all_down(seq, up):
+        up = dict(up)
+        for c in seq:
+            if c[:3] == ["ip", "link", "set"]:
+                up[c[3]] = c[4] == "up"
+            elif c[:2] == ["iw", "dev"] and c[3:] == ["del"]:
+                up[c[2]] = False
+            elif c[:2] == ["iw", "phy"] and c[3] == "interface":
+                up[c[5]] = False  # 作ったばかりのIFは下りている
+            assert any(up.values()), f"無線が止まる：{' '.join(c)}"
+        return up
+
+    r.managed_scan()
+    r.set_monitor()
+    (sysnet / "wwmon0").mkdir()
+    assert not any(c[-2:] == ["type", "managed"] for c in run.calls)  # 管理モードのIFは触り直さない
+    # 起動のときは管理モードのIFが上がっている（NetworkManager から外しただけ）
+    assert never_all_down(run.calls, {"wlan0": True}) == {"wlan0": False, "wwmon0": True}
+    run.calls.clear()
+    r.reset_monitor()  # 復旧：先にスキャン（管理モードのIFを上げてからモニタ用IFを消す）→ 作り直す
+    seq = [" ".join(c) for c in run.calls]
+    assert seq.index("ip link set wlan0 up") < seq.index("iw dev wwmon0 del") < seq.index("iw dev wlan0 scan passive")
+    assert never_all_down(run.calls, {"wlan0": False, "wwmon0": True}) == {"wlan0": False, "wwmon0": True}
+    # IFがモニタのまま（前の版のやり方）なら、今までどおり下げて管理モードに戻す
+    (sysnet / "wlan0" / "type").write_text("803\n")
+    run.calls.clear()
+    r.managed_scan()
+    assert ["iw", "dev", "wlan0", "set", "type", "managed"] in run.calls

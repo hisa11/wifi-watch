@@ -2,6 +2,8 @@
 # 2.4GHz の強さの読み取りを調べる（2分ほど。終わると Wi-Fi を元に戻す）。本体（./start.sh pit）は止めてから動かす。
 # 受信専用：パッシブスキャンとモニタの受信だけ。結果は data/rssi_check.txt に残す（写真でも読める長さ）。
 #   tools/rssi_check.sh wlp2s0
+#   tools/rssi_check.sh wlp2s0 --restart   # 前の版の本体と同じく、スキャンの前に無線を一度止める（ip link set down）。
+#                                          # 本体だけで強さが 40〜55dB 強く狂った件が、これで起きるかを見る
 # 1. 管理モードでパッシブスキャン：カーネルが出す強さ（正しい値の手本）を、見えた局すべてについて控える
 # 2. 本体と同じやり方（国を保ったまま wwmon0 でモニタ）で 2.4GHz の13chを回り、APごとに1行で並べる：
 #    手本・長（1chに1秒）・短（0.25秒ずつ切り替え）・5G後（各chの前に 5GHz ch144。本体の PRE で ch1 の前と同じ）・
@@ -9,6 +11,8 @@
 #    外れた値（-25dBm以上など）は、回ごとの数と合わせてからの時間、APごとに一番強いものの radiotap の頭を出す
 set -u
 IF="${1:-}"
+RESTART=0
+[[ "${2:-}" == "--restart" ]] && RESTART=1
 [[ -n "$IF" ]] || { echo "IF名を付けてください（例：tools/rssi_check.sh wlp2s0）"; exit 2; }
 [[ "$IF" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || { echo "IF名が不正です: $IF"; exit 2; }
 [[ -d /sys/class/net/$IF ]] || { echo "$IF がありません"; exit 2; }
@@ -43,7 +47,11 @@ trap 'exit 130' INT TERM
 
 echo "== $(date '+%F %T') $IF（$PHY）$(ethtool -i "$IF" 2>/dev/null | sed -n 's/^firmware-version: /FW /p')"
 sudo nmcli device set "$IF" managed no; sleep 3
-sudo ip link set "$IF" up
+if [[ $RESTART -eq 1 ]]; then
+  echo "0. 前の版の本体と同じく、無線を一度止めてから上げる"
+  sudo ip link set "$IF" down; sudo iw dev "$IF" set type managed
+fi
+for _ in 1 2 3 4; do sudo ip link set "$IF" up && break; sleep 2; done
 sudo iw dev "$IF" scan passive >/dev/null 2>&1 || { sleep 2; sudo iw dev "$IF" scan passive >/dev/null 2>&1; }
 REF=$(mktemp)
 sudo iw dev "$IF" scan dump 2>/dev/null | awk '
