@@ -152,6 +152,99 @@ const tip = {
   hide() { if (this.el) this.el.hidden = true; },
 };
 
+// ------------------------------------------------------------------ タッチの説明（指を離しても残る）
+// タッチでは「マウスを置くと出る説明」が出ないので、グラフを押す・なぞると説明を出し、離しても残す。
+// 指で隠れないよう、グラフのカードの上の、指と反対の側に寄せて出す。× か、グラフの外を押すと消える。
+const pin = {
+  el: null,
+  cur: null, // { key: グラフ（ptrKey）, fx: 横の位置（0〜1）, py: 縦の位置, cx: 指の画面のx, anchor, picked }
+  show(cur, nodes, actions) {
+    const el = (this.el ||= $("pincard"));
+    const same = this.cur && this.cur.key === cur.key && this.cur.picked === cur.picked && el.querySelector(".pin-actions");
+    if (!this.cur || this.cur.key !== cur.key) this.clearMarks(); // 別のグラフに移ったら、前の縦線と太線を消す
+    this.cur = cur;
+    tip.hide();
+    const body = h("div", { class: "pin-body" }, ...nodes);
+    if (same) {
+      // 中身だけ入れ替える（押しかけのボタンを作り直さない。1秒ごとの描き直しでボタンが消えないように）
+      el.querySelector(".pin-body").replaceWith(body);
+    } else {
+      const close = h("button", { type: "button", class: "icon-btn pin-x", "aria-label": "閉じる", text: "×", onclick: () => this.hide() });
+      clear(el).append(close, body, h("div", { class: "pin-actions", hidden: !actions.length }, ...actions));
+    }
+    el.hidden = false;
+    this.place();
+  },
+  /** 説明の文（マウスを置くと出る title）を、押したところの下に出す。 */
+  showText(target, text) {
+    this.show({ key: null, anchor: target, cx: null, picked: text }, [h("div", { class: "r", text })], []);
+  },
+  place() {
+    const el = this.el, c = this.cur;
+    if (!el || !c) return;
+    const r = c.anchor.getBoundingClientRect();
+    const w = el.offsetWidth, hh = el.offsetHeight;
+    let left, top;
+    if (c.cx == null) { // 文：押したところの下（入らなければ上）
+      left = r.left;
+      top = r.bottom + hh + 8 > innerHeight ? r.top - hh - 6 : r.bottom + 6;
+    } else { // グラフ：カードの上の端、指と反対の側
+      left = c.cx > r.left + r.width / 2 ? r.left + 8 : r.right - w - 8;
+      top = r.top + 8;
+    }
+    el.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, left))}px`;
+    el.style.top = `${Math.max(8, Math.min(innerHeight - hh - 8, top))}px`;
+  },
+  hide() {
+    this.cur = null;
+    if (this.el) this.el.hidden = true;
+    this.clearMarks();
+  },
+  clearMarks() {
+    for (const g of document.querySelectorAll(".touch-guide")) g.setAttribute("visibility", "hidden");
+    for (const g of document.querySelectorAll(".st-shape.pinned")) g.classList.remove("pinned");
+  },
+  /** 描き直しのあと：説明していたものが画面から消えていたら閉じる。 */
+  check() {
+    if (this.cur && (!this.cur.anchor.isConnected || !this.cur.anchor.offsetParent)) this.hide();
+    else this.place();
+  },
+};
+
+// ------------------------------------------------------------------ 操作のしかた（マウスかタッチか）
+// 自動：押したものがタッチ（ペン）ならタッチ向け、マウスならマウス向け（はじめは画面の種類で決める）。
+// タッチ向け：ボタン・表の行・境目のつまみを大きく、グラフは押す・なぞると説明を出して残す。
+const INPUT_MODES = [["auto", "自動"], ["touch", "タッチ"], ["mouse", "マウス"]];
+const touchLike = (ev) => ui.touch || (ev && ev.pointerType != null && ev.pointerType !== "mouse" && ev.pointerType !== "");
+
+function applyInputMode() {
+  const coarse = matchMedia("(pointer: coarse)").matches;
+  const t = ui.inputMode === "touch" || (ui.inputMode === "auto" && (ui.lastPointer ? ui.lastPointer === "touch" : coarse));
+  const changed = t !== ui.touch;
+  ui.touch = t;
+  document.body.classList.toggle("touch", t);
+  const hint = $("viewHint");
+  if (hint) {
+    hint.textContent = t
+      ? "グラフは押す・なぞると説明（×かグラフの外で閉じる）。見出しを押すとその帯域だけ大きく"
+      : "グラフの見出しを押しても切り替わります（キー 6・5・2、0で全部）";
+  }
+  const now = $("inputNow");
+  if (now) now.textContent = ui.inputMode === "auto" ? `いまは${t ? "タッチ" : "マウス"}向け` : "";
+  if (changed) {
+    if (!t) pin.hide(); // タッチ向けになったときは、いま指で出した説明を残す
+    tip.hide();
+    scheduleCharts();
+  }
+}
+
+function setInputMode(v) {
+  if (!INPUT_MODES.some(([k]) => k === v)) return;
+  ui.inputMode = v;
+  prefs.set("inputMode", v);
+  applyInputMode();
+}
+
 // ------------------------------------------------------------------ 状態
 const ui = {
   state: null,
@@ -161,6 +254,9 @@ const ui = {
   stFilter: prefs.get("stFilter", { band: "all", kind: "all", present: true, q: "" }),
   stSort: prefs.get("stSort", { key: "rssi", asc: false }),
   pointer: {},
+  inputMode: prefs.get("inputMode", "auto"),
+  touch: false,
+  lastPointer: null,
   bandView: prefs.get("bandView", "all"),
   clockMetric: prefs.get("clockMetric", "stations"),
   verdictLevel: "blind",
@@ -226,7 +322,7 @@ function presenceText(x) {
   return `いる扱い（見に行って${missed}回聞こえなかった。2回で「いない」）`;
 }
 
-function stationNode(st) {
+function stationNode(st, hint = "クリックで詳細") {
   const k = kindOf(st.kind);
   const wrap = h("div");
   wrap.append(
@@ -240,11 +336,11 @@ function stationNode(st) {
   wrap.append(h("div", { class: "r", text: st.bssid }));
   if (st.alerts && st.alerts.length) wrap.append(h("div", { class: "r", text: `警報：${st.alerts.map((a) => ALERT_TYPE_JP[a] || a).join("、")}` }));
   if (st.new) wrap.append(h("div", { class: "r", text: "新規参入（自分の帯域に新しく現れた）" }));
-  wrap.append(h("div", { class: "r", text: "クリックで詳細" }));
+  if (hint) wrap.append(h("div", { class: "r", text: hint }));
   return [wrap];
 }
 
-function overlapNode(hits, record = false) {
+function overlapNode(hits, record = false, hint = "クリックで全部の詳細") {
   const out = h("div");
   out.append(h("div", { class: "v", text: `ここに重なる局 ${hits.length}` }));
   for (const st of hits.slice(0, 6)) {
@@ -253,12 +349,12 @@ function overlapNode(hits, record = false) {
       h("b", { text: ssidText(st) }), h("span", { class: "r", text: `${st.rssi ?? "強さ不明"}${st.rssi != null ? "dBm" : ""}・${chLabel(st.freq)}・${st.width_label}MHz` })));
   }
   if (hits.length > 6) out.append(h("div", { class: "r", text: `ほか ${hits.length - 6}局` }));
-  out.append(h("div", { class: "r", text: "クリックで全部の詳細" }));
+  if (hint) out.append(h("div", { class: "r", text: hint }));
   return [out];
 }
 
 /** 記録の中の局のツールチップ（記録を取ったときの値。今いるかどうかは出さない）。 */
-function recordStationNode(st) {
+function recordStationNode(st, hint = "クリックで詳細") {
   const k = kindOf(st.kind);
   const wrap = h("div");
   wrap.append(
@@ -271,7 +367,7 @@ function recordStationNode(st) {
   if (st.team) wrap.append(h("div", { class: "r", text: `${k.label}・${st.team}` }));
   if (st.rssi_samples > 1) wrap.append(h("div", { class: "r", text: `強さは${st.rssi_samples}回の結果の中央値` }));
   wrap.append(h("div", { class: "r", text: st.bssid }));
-  wrap.append(h("div", { class: "r", text: "記録を取ったときの値・クリックで詳細" }));
+  wrap.append(h("div", { class: "r", text: `記録を取ったときの値${hint ? `・${hint}` : ""}` }));
   return [wrap];
 }
 
@@ -366,7 +462,7 @@ function renderSpectrum(container, band, opt) {
     if (!st.present) cls.push("gone");
     if (anySel && !isChosen(st.bssid)) cls.push("dim");
     if (isChosen(st.bssid)) cls.push("selected");
-    const g = s("g", { class: cls.join(" ") });
+    const g = s("g", { class: cls.join(" "), dataset: { bssid: st.bssid } });
     for (const [lo, hi] of st.spans) {
       const xa = x(lo), xz = x(hi);
       const sl = Math.min(6, (xz - xa) * 0.12);
@@ -438,28 +534,30 @@ function renderSpectrum(container, band, opt) {
     svg.append(s("text", { class: "ax-row", x: L - 6, y: xb + 36, "text-anchor": "end", text: "予約" }));
   }
 
-  // ホバー：いちばん近い局（台形の上の辺）を拾う。無ければch
+  // ホバー：いちばん近い局（台形の上の辺）を拾う。無ければch。タッチは押す・なぞると説明を出して残す（pin）
   if (interactive) {
     const overlay = s("rect", { class: "hit", x: L, y: 0, width: W - R - L, height: totalH });
-    const pick = (ev) => {
+    const guide = s("line", { class: "touch-guide", x1: 0, x2: 0, y1: T, y2: xb, visibility: "hidden" });
+    const tol = ui.touch ? 26 : 14; // 指は太いので、拾う範囲を広く
+    const toSvg = (ev) => {
       // 画面の位置 → グラフの中の位置。描いたときと表示の幅が違っても（中央寄せ・拡大縮小）ずれないよう、実際の変換を使う
       const m = svg.getScreenCTM();
-      let px, py;
       if (m) {
         const q = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(m.inverse());
-        px = q.x; py = q.y;
-      } else {
-        const pt = svg.getBoundingClientRect();
-        const sx = W / pt.width;
-        px = (ev.clientX - pt.left) * sx; py = (ev.clientY - pt.top) * sx;
+        return [q.x, q.y];
       }
+      const pt = svg.getBoundingClientRect();
+      const sx = W / pt.width;
+      return [(ev.clientX - pt.left) * sx, (ev.clientY - pt.top) * sx];
+    };
+    const pickAt = (px, py) => {
       let best = null;
       const under = new Map(); // ポインタの下にある局（台形の中か、上の辺の近く）。重なっていれば全部
       for (const gq of geo) {
         if (px < gq.xa - 2 || px > gq.xz + 2) continue;
         const d = Math.abs(py - gq.yt);
-        if (d <= 14 && (!best || d < best.d)) best = { d, st: gq.st };
-        if (py >= gq.yt - 14 && py <= xb) under.set(gq.st.bssid, gq.st);
+        if (d <= tol && (!best || d < best.d)) best = { d, st: gq.st };
+        if (py >= gq.yt - tol && py <= xb) under.set(gq.st.bssid, gq.st);
       }
       const hits = [...under.values()].sort((p, q) => (q.rssi ?? -200) - (p.rssi ?? -200));
       let row = null;
@@ -469,29 +567,75 @@ function renderSpectrum(container, band, opt) {
       }
       return { best, row, hits };
     };
-    const onMove = (ev) => {
-      ui.pointer[ptrKey] = { x: ev.clientX, y: ev.clientY };
-      const { best, row, hits } = pick(ev);
-      overlay.style.cursor = best || hits.length ? "pointer" : "crosshair";
-      if (hits.length > 1) tip.show(ev.clientX, ev.clientY, overlapNode(hits, record));
-      else if (best || hits.length) tip.show(ev.clientX, ev.clientY, (record ? recordStationNode : stationNode)((best && best.st) || hits[0]));
-      else if (row && !record) tip.show(ev.clientX, ev.clientY, channelNode(row));
-      else tip.hide();
+    const pick = (ev) => pickAt(...toSvg(ev));
+    const nodesFor = ({ best, row, hits }, touch) => {
+      if (hits.length > 1) return overlapNode(hits, record, touch ? null : undefined);
+      if (best || hits.length) return (record ? recordStationNode : stationNode)((best && best.st) || hits[0], touch ? null : undefined);
+      if (row && !record) return channelNode(row);
+      return null;
     };
-    overlay.addEventListener("pointermove", onMove);
-    overlay.addEventListener("pointerleave", () => { delete ui.pointer[ptrKey]; tip.hide(); });
-    overlay.addEventListener("click", (ev) => {
-      const { best, hits } = pick(ev);
-      const picked = hits.length > 1 ? hits.map((q) => q.bssid) : best ? [best.st.bssid] : hits.length ? [hits[0].bssid] : [];
+    const pickedOf = ({ best, hits }) => (hits.length > 1 ? hits.map((q) => q.bssid) : best ? [best.st.bssid] : hits.length ? [hits[0].bssid] : []);
+    const openPicked = (picked) => {
       if (record) { if (opt.onPick) opt.onPick(picked); return; } // 記録の局は今の局の詳細（引き出し）を開かない
       if (picked.length > 1) selectMany(picked);
       else select(picked[0] || null);
+    };
+    const onMove = (ev) => {
+      ui.pointer[ptrKey] = { x: ev.clientX, y: ev.clientY };
+      const r = pick(ev);
+      overlay.style.cursor = r.best || r.hits.length ? "pointer" : "crosshair";
+      const nodes = nodesFor(r, false);
+      if (nodes) tip.show(ev.clientX, ev.clientY, nodes); else tip.hide();
+    };
+    // タッチ：その位置の説明を、指を離しても残す（指の位置に縦の線、説明している局を太く）
+    const pinAt = (px, py, cx) => {
+      const r = pickAt(px, py);
+      const picked = pickedOf(r);
+      const nodes = nodesFor(r, true) || [h("div", { class: "r", text: "ここには局もchもありません" })];
+      const acts = picked.length ? [h("button", { type: "button", class: "btn primary",
+        text: picked.length > 1 ? `${picked.length}局の詳細を見る` : "詳しく見る", onclick: () => { pin.hide(); openPicked(picked); } })] : [];
+      pin.show({ key: ptrKey, fx: (px - L) / (W - R - L), py, cx, anchor: container.closest(".card") || container, picked: picked.join(",") }, nodes, acts);
+      guide.setAttribute("x1", px); guide.setAttribute("x2", px); guide.setAttribute("visibility", "visible");
+      const on = new Set(picked);
+      for (const g of svg.querySelectorAll(".st-shape")) g.classList.toggle("pinned", on.has(g.dataset.bssid));
+    };
+    overlay.addEventListener("pointermove", (ev) => {
+      if (ev.pointerType && ev.pointerType !== "mouse") return; // 指はホバーしない（押している間は pin が受ける）
+      if (pin.cur && pin.cur.key != null) return; // タッチの説明を出している間は、マウスのホバーで上書きしない
+      onMove(ev);
     });
-    svg.append(overlay);
+    overlay.addEventListener("pointerleave", () => { delete ui.pointer[ptrKey]; tip.hide(); });
+    overlay.addEventListener("click", (ev) => {
+      if (container._touchDown) return; // タッチで押したときは、説明を出すだけ（詳細は説明の「詳しく見る」）
+      openPicked(pickedOf(pick(ev)));
+    });
+    svg.append(guide, overlay);
     svg._refreshTip = () => {
+      if (pin.cur && pin.cur.key === ptrKey) {
+        pinAt(L + pin.cur.fx * (W - R - L), pin.cur.py, pin.cur.cx);
+        return;
+      }
       const p = ui.pointer[ptrKey];
       if (p) onMove({ clientX: p.x, clientY: p.y });
     };
+    // 押す・なぞるは、描き直しても残る container で受ける（1秒ごとに svg を作り直しても、なぞる途中で切れない）
+    container._pinEv = (ev) => { const [px, py] = toSvg(ev); pinAt(px, py, ev.clientX); };
+    if (!container._touchInit) {
+      container._touchInit = true;
+      container.addEventListener("pointerdown", (ev) => {
+        container._touchDown = touchLike(ev);
+        if (!container._touchDown || !ev.target.closest(".hit") || ev.button > 0) return;
+        ev.preventDefault();
+        try { container.setPointerCapture(ev.pointerId); } catch { /* 取れなくても押した位置は出す */ }
+        container._drag = ev.pointerId;
+        container._pinEv(ev);
+      });
+      container.addEventListener("pointermove", (ev) => { if (container._drag === ev.pointerId) container._pinEv(ev); });
+      const end = (ev) => { if (container._drag === ev.pointerId) container._drag = null; };
+      container.addEventListener("pointerup", end);
+      container.addEventListener("pointercancel", end);
+      container.addEventListener("contextmenu", (ev) => { if (container._touchDown) ev.preventDefault(); }); // 長押しのメニューを出さない
+    }
   }
   clear(container).append(svg);
   if (svg._refreshTip) svg._refreshTip();
@@ -639,7 +783,9 @@ const BAND_CARD = { "6": "h6", "5": "h5", "2.4": "h24" };
 function buildViewbar() {
   const bar = clear($("viewbar"));
   bar.append(h("span", { text: "表示する帯域" }), segControl(BAND_VIEWS, ui.bandView, setBandView),
-    h("span", { class: "hint", text: "グラフの見出しを押しても切り替わります（キー 6・5・2、0で全部）" }));
+    h("span", { class: "hint", id: "viewHint", text: "グラフの見出しを押しても切り替わります（キー 6・5・2、0で全部）" }),
+    h("span", { class: "input-mode" }, h("span", { text: "操作" }), segControl(INPUT_MODES, ui.inputMode, setInputMode),
+      h("span", { class: "hint", id: "inputNow" })));
   for (const [band, id] of Object.entries(BAND_CARD)) {
     const t = $(id);
     t.classList.add("band-title");
@@ -650,6 +796,7 @@ function buildViewbar() {
 
 function setBandView(v) {
   if (!BAND_VIEWS.some(([k]) => k === v)) return;
+  pin.hide();
   ui.bandView = v;
   prefs.set("bandView", v);
   applyBandView();
@@ -813,15 +960,16 @@ function positionSplitters() {
     if (hh != null) sp.style.height = `${hh}px`;
   };
   const gap = 12;
+  const half = ui.touch ? 14 : 6; // つまみの太さの半分（タッチは指で取れるよう太い）
   const tR = R(top);
   const sR = R(document.querySelector(".side"));
-  place("side", !single, sR.left - gap / 2 - 6, tR.top, null, sR.bottom - tR.top);
-  place("h6", true, tR.left, tR.bottom + gap / 2 - 6, tR.width, null);
+  place("side", !single, sR.left - gap / 2 - half, tR.top, null, sR.bottom - tR.top);
+  place("h6", true, tR.left, tR.bottom + gap / 2 - half, tR.width, null);
   if (!solo) {
     const f = R(card("chart5")), t = R(card("chart24"));
-    place("mid", !single, (f.right + t.left) / 2 - 6, f.top, null, f.height);
+    place("mid", !single, (f.right + t.left) / 2 - half, f.top, null, f.height);
     const last = single ? t : (f.bottom > t.bottom ? f : t);
-    place("h5", true, single ? t.left : f.left, last.bottom + gap / 2 - 6, single ? t.width : t.right - f.left, null);
+    place("h5", true, single ? t.left : f.left, last.bottom + gap / 2 - half, single ? t.width : t.right - f.left, null);
   } else {
     place("mid", false); place("h5", false);
   }
@@ -1694,6 +1842,7 @@ function render(st) {
   renderTop(st);
   renderCharts(st);
   positionSplitters();
+  pin.check();
   renderAlerts(st);
   renderOwnTile(st);
   renderSuggestions(st);
@@ -1751,6 +1900,27 @@ function init() {
     if (v) setBandView(v);
   });
   buildViewbar();
+  applyInputMode();
+  // 自動のとき：押したものがタッチかマウスかで向きを変える（押し終わってから。押している間に大きさが変わって押し違えないよう）
+  addEventListener("pointerdown", (e) => {
+    if (ui.inputMode !== "auto" || !e.pointerType) return;
+    const k = e.pointerType === "mouse" ? "mouse" : "touch";
+    if (k === ui.lastPointer) return;
+    ui.lastPointer = k;
+    addEventListener("pointerup", () => setTimeout(applyInputMode, 0), { once: true, capture: true });
+  }, true);
+  // タッチの説明は、グラフと説明の外を押すと消える
+  document.addEventListener("pointerdown", (e) => {
+    if (pin.cur && !e.target.closest("#pincard") && !(pin.cur.key != null && e.target.closest(".chart"))) pin.hide();
+  }, true);
+  // タッチでは「マウスを置くと出る説明」（title）が出ないので、押したら出す（押して動くものは除く）
+  document.addEventListener("click", (e) => {
+    if (!ui.touch) return;
+    const el = e.target.closest("[title]");
+    if (!el || !el.title || el.closest("button, a, input, select, textarea, label, tr, [role=separator], [role=tab], .band-title, #segclock")) return;
+    pin.showText(el, el.title);
+  });
+  addEventListener("scroll", () => pin.place(), true);
   applyBandView();
   applySplit();
   buildSplitters();
@@ -1766,6 +1936,7 @@ function init() {
   setInterval(renderClock, 1000);
   let rt = null;
   addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => ui.state && render(ui.state), 150); });
+  matchMedia("(pointer: coarse)").addEventListener?.("change", applyInputMode);
   setTab(ui.tab);
   if (ui.selected) $("drawer").hidden = true;
   ui.selected = null;

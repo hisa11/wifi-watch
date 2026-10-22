@@ -447,6 +447,21 @@ td .rssi i { display: inline-block; height: 6px; border-radius: 0 3px 3px 0; bac
 .tooltip .r { color: var(--ink-2); }
 .tooltip .row { display: flex; align-items: center; gap: 6px; }
 .tooltip .linekey { width: 12px; height: 2px; display: inline-block; background: currentColor; }
+/* タッチの説明（指を離しても残る。グラフのカードの上の、指と反対の側） */
+.pincard {
+  position: fixed; z-index: 55; width: max-content; max-width: min(360px, calc(100vw - 16px)); max-height: 70vh; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow);
+  padding: 10px 12px; font-size: 13px;
+}
+.pincard .pin-x { position: absolute; top: 2px; right: 2px; width: 44px; height: 44px; }
+.pincard .pin-body { padding-right: 34px; min-height: 28px; }
+.pincard .v { font-weight: 700; font-size: 15px; }
+.pincard .r { color: var(--ink-2); }
+.pincard .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 0; }
+.pincard .pin-actions { display: flex; gap: 8px; margin-top: 10px; }
+.pincard .pin-actions .btn { flex: 1; min-height: 44px; font-size: 14px; }
+.touch-guide { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; pointer-events: none; }
+.st-shape.pinned { stroke-width: 4; fill-opacity: 0.25; opacity: 1; }
 .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; gap: 6px; }
 .toast { background: var(--ink); color: var(--surface); padding: 8px 12px; border-radius: 8px; box-shadow: var(--shadow); max-width: 420px; }
 .toast.err { background: var(--crit); color: #fff; }
@@ -478,6 +493,30 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 .splitter.v:hover::after, .splitter.v.dragging::after { top: 0; bottom: 0; }
 .splitter.h:hover::after, .splitter.h.dragging::after { left: 0; right: 0; }
 .splitter:focus-visible { outline: none; }
+
+/* ------------------------------------------------------------ タッチ向け（操作：タッチ、または自動で指を使ったとき） */
+.input-mode { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+body.touch .hit { touch-action: none; cursor: default; }
+body.touch .chart { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.touch .btn { min-height: 44px; padding: 8px 16px; font-size: 14px; }
+body.touch .seg button { min-height: 44px; padding: 8px 14px; font-size: 14px; }
+body.touch .tabs button { min-height: 48px; padding: 10px 16px; font-size: 14px; }
+body.touch .mode-switch button { min-height: 48px; padding: 6px 18px; }
+body.touch .icon-btn { min-width: 44px; min-height: 44px; }
+body.touch .band-title { padding: 6px 0; }
+body.touch .party { min-height: 34px; padding: 4px 10px; font-size: 12px; }
+body.touch .chip-blind, body.touch .chip-fake { padding: 6px 12px; }
+body.touch .followbar .x, body.touch .own-chip .chip-x { min-width: 40px; min-height: 40px; }
+body.touch input[type="search"], body.touch input[type="text"], body.touch select, body.touch textarea { min-height: 42px; font-size: 15px; }
+body.touch table.data { font-size: 13px; }
+body.touch table.data th { padding: 10px; }
+body.touch table.data td { padding: 11px 10px; }
+body.touch .multi-table td { padding: 10px 6px; }
+body.touch .splitter.v { width: 28px; }
+body.touch .splitter.h { height: 28px; }
+body.touch .splitter.v::after { left: 12px; width: 4px; }
+body.touch .splitter.h::after { top: 12px; height: 4px; }
+body.touch .splitter::after { opacity: 0.7; } /* ホバーが無いので、つまみをいつも見せる */
 body.resizing, body.resizing * { user-select: none; cursor: inherit; }
 
 /* 7セグメントの時計（segclock.js） */
